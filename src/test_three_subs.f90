@@ -38,6 +38,7 @@ PROGRAM test_three_subs
     INTEGER :: p1, p2, p3
     LOGICAL :: stop_now
     INTEGER :: max_checks, checked_count
+    INTEGER :: u1, u2, u3
 
     ! Initialize energy model (builds internal eqmatrix/dE arrays)
     CALL init_energy_calc()
@@ -307,6 +308,7 @@ PROGRAM test_three_subs
     CLOSE(15)
     ALLOCATE(subpos(Mm1))
     subpos = conf1
+        ! (subpos contains the list of substitutable positions for MC sites)
 
     ! Read n03/OUTSOD
     OPEN(UNIT=17, FILE='n03/OUTSOD', STATUS='OLD', IOSTAT=io_stat)
@@ -356,19 +358,19 @@ PROGRAM test_three_subs
     END DO
     CLOSE(18)
 
-    ! Iterate combinations of site indices (1..Mm1 choose 3)
+    ! (conf3 contains representative triples expressed as position indices)
     max_checks = 25
     checked_count = 0
     stop_now = .FALSE.
     WRITE(*,*) 'test_three_subs: iterating combinations and matching to n03 representatives...'
-    ! Enumerate triples over unit-cell positions (npos) and map to MC sites
-    DO p1 = 1, npos-2
-        DO p2 = p1+1, npos-1
-            DO p3 = p2+1, npos
-                ! positions
-                i = p1
-                j = p2
-                k = p3
+    ! Enumerate triples over substitutable positions (values in subpos)
+    DO u1 = 1, Mm1-2
+        DO u2 = u1+1, Mm1-1
+            DO u3 = u2+1, Mm1
+                ! positions (position indices taken from subpos list)
+                i = subpos(u1)
+                j = subpos(u2)
+                k = subpos(u3)
                 ! canonical triple (target)
                 ti = MIN(i, MIN(j,k))
                 tk = MAX(i, MAX(j,k))
