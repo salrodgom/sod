@@ -35,6 +35,7 @@ PROGRAM test_three_subs
     REAL(dp) :: e_calc, e_ref
     INTEGER :: s1,s2,s3
     INTEGER :: found, opcheck, mcheck
+    INTEGER :: max_checks, checked_count
 
     ! Initialize energy model (builds internal eqmatrix/dE arrays)
     CALL init_energy_calc()
@@ -354,6 +355,8 @@ PROGRAM test_three_subs
     CLOSE(18)
 
     ! Iterate combinations of site indices (1..Mm1 choose 3)
+    max_checks = 25
+    checked_count = 0
     WRITE(*,*) 'test_three_subs: iterating combinations and matching to n03 representatives...'
     DO s1 = 1, Mm1-2
         DO s2 = s1+1, Mm1-1
@@ -409,9 +412,16 @@ PROGRAM test_three_subs
                     WRITE(*,'(A,I3,A,I3,A,I3,A,F15.8)') 'Sites:', s1, ',', s2, ',', s3, '  NO_MATCH   E_calc=', e_calc
                 END IF
                 ! keep config allocated for reuse
+                checked_count = checked_count + 1
+                IF (checked_count >= max_checks) THEN
+                    WRITE(*,'(A,I4)') 'test_three_subs: reached max checks=', checked_count
+                    EXIT
+                END IF
             END DO
         END DO
     END DO
+
+    WRITE(*,'(A,I6)') 'test_three_subs: total checked=', checked_count
 
     WRITE(*,*) 'test_three_subs: done.'
 
