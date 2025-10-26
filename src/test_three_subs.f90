@@ -35,6 +35,8 @@ PROGRAM test_three_subs
     REAL(dp) :: e_calc, e_ref
     INTEGER :: s1,s2,s3
     INTEGER :: found, opcheck, mcheck
+    INTEGER :: p1, p2, p3
+    LOGICAL :: stop_now
     INTEGER :: max_checks, checked_count
 
     ! Initialize energy model (builds internal eqmatrix/dE arrays)
@@ -357,14 +359,16 @@ PROGRAM test_three_subs
     ! Iterate combinations of site indices (1..Mm1 choose 3)
     max_checks = 25
     checked_count = 0
+    stop_now = .FALSE.
     WRITE(*,*) 'test_three_subs: iterating combinations and matching to n03 representatives...'
-    DO s1 = 1, Mm1-2
-        DO s2 = s1+1, Mm1-1
-            DO s3 = s2+1, Mm1
+    ! Enumerate triples over unit-cell positions (npos) and map to MC sites
+    DO p1 = 1, npos-2
+        DO p2 = p1+1, npos-1
+            DO p3 = p2+1, npos
                 ! positions
-                i = subpos(s1)
-                j = subpos(s2)
-                k = subpos(s3)
+                i = p1
+                j = p2
+                k = p3
                 ! canonical triple (target)
                 ti = MIN(i, MIN(j,k))
                 tk = MAX(i, MAX(j,k))
@@ -392,33 +396,39 @@ PROGRAM test_three_subs
                     IF (found == 1) EXIT
                 END DO
 
-                ! Build config array for calculate_structure_energy
+                ! Build config array for calculate_structure_energy by mapping positions
                 IF (.NOT. ALLOCATED(config)) ALLOCATE(config(Mm1))
                 IF (SIZE(config) /= Mm1) THEN
                     IF (ALLOCATED(config)) DEALLOCATE(config)
                     ALLOCATE(config(Mm1))
                 END IF
                 config = 1
-                config(s1) = 2
-                config(s2) = 2
-                config(s3) = 2
+                ! For each MC site, set to 2 if its subpos equals one of the chosen positions
+                DO s1 = 1, Mm1
+                    IF (subpos(s1) == i .OR. subpos(s1) == j .OR. subpos(s1) == k) THEN
+                        config(s1) = 2
+                    END IF
+                END DO
 
                 CALL calculate_structure_energy(config, Mm1, e_calc)
 
                 IF (found == 1) THEN
                     e_ref = energies3(mcheck)
-                    WRITE(*,'(A,I3,A,I3,A,I3,A,I4,A,F15.8,A,F15.8,A,F12.8)') 'Sites:', s1, ',', s2, ',', s3, '  rep=', mcheck, '  E_calc=', e_calc, '  E_ref=', e_ref, '  diff=', e_calc - e_ref
+                    WRITE(*,'(A,I3,A,I3,A,I3,A,I4,A,F15.8,A,F15.8,A,F12.8)') 'Positions:', i, ',', j, ',', k, '  rep=', mcheck, '  E_calc=', e_calc, '  E_ref=', e_ref, '  diff=', e_calc - e_ref
                 ELSE
-                    WRITE(*,'(A,I3,A,I3,A,I3,A,F15.8)') 'Sites:', s1, ',', s2, ',', s3, '  NO_MATCH   E_calc=', e_calc
+                    WRITE(*,'(A,I3,A,I3,A,I3,A,F15.8)') 'Positions:', i, ',', j, ',', k, '  NO_MATCH   E_calc=', e_calc
                 END IF
                 ! keep config allocated for reuse
                 checked_count = checked_count + 1
                 IF (checked_count >= max_checks) THEN
                     WRITE(*,'(A,I4)') 'test_three_subs: reached max checks=', checked_count
+                    stop_now = .TRUE.
                     EXIT
                 END IF
             END DO
+            IF (stop_now) EXIT
         END DO
+        IF (stop_now) EXIT
     END DO
 
     WRITE(*,'(A,I6)') 'test_three_subs: total checked=', checked_count
