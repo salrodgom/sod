@@ -39,6 +39,13 @@ PROGRAM test_three_subs
     LOGICAL :: stop_now
     INTEGER :: max_checks, checked_count
     INTEGER :: u1, u2, u3
+    INTEGER :: sample_size, ncomb
+    INTEGER, ALLOCATABLE :: perm(:)
+    LOGICAL, ALLOCATABLE :: selected(:)
+    INTEGER :: argcount, seed_sz, iostat_arg
+    INTEGER, ALLOCATABLE :: seed(:)
+    INTEGER :: scount, comb_idx
+    REAL(dp) :: rnum
 
     ! Initialize energy model (builds internal eqmatrix/dE arrays)
     CALL init_energy_calc()
@@ -359,11 +366,66 @@ PROGRAM test_three_subs
     CLOSE(18)
 
     ! (conf3 contains representative triples expressed as position indices)
-    ! By default check all possible triples (Mm1 choose 3). This increases output compared to the previous hard-coded 25.
+    ! Decide whether to sample a random subset or check all combinations.
+    ! Optional command-line argument: sample_size (integer). If absent or <=0, check all combinations.
+    argcount = COMMAND_ARGUMENT_COUNT()
+    sample_size = 0
+    IF (argcount >= 1) THEN
+        CALL GET_COMMAND_ARGUMENT(1, line)
+        READ(line,*,IOSTAT=iostat_arg) sample_size
+        IF (iostat_arg /= 0) THEN
+            sample_size = 0
+        END IF
+    END IF
+    ! Total number of combinations (Mm1 choose 3)
     IF (Mm1 >= 3) THEN
-        max_checks = Mm1*(Mm1-1)*(Mm1-2)/6
+        ncomb = Mm1*(Mm1-1)*(Mm1-2)/6
     ELSE
-        max_checks = 0
+        ncomb = 0
+    END IF
+    IF (sample_size <= 0 .OR. sample_size >= ncomb) THEN
+        ! Check all combinations
+        IF (ncomb > 0) THEN
+            max_checks = ncomb
+        ELSE
+            max_checks = 0
+        END IF
+        IF (ALLOCATED(selected)) DEALLOCATE(selected)
+        IF (ncomb > 0) THEN
+            ALLOCATE(selected(ncomb))
+            selected = .TRUE.
+        END IF
+    ELSE
+        ! Build a random sample of unique combination indices (1..ncomb)
+        ! Seed RNG from system clock
+        CALL SYSTEM_CLOCK(scount)
+        CALL RANDOM_SEED(size=seed_sz)
+        ALLOCATE(seed(seed_sz))
+        DO i = 1, seed_sz
+            seed(i) = scount + i
+        END DO
+        CALL RANDOM_SEED(PUT=seed)
+        ALLOCATE(perm(ncomb))
+        DO i = 1, ncomb
+            perm(i) = i
+        END DO
+        ! Fisher-Yates shuffle
+        DO i = ncomb, 2, -1
+            CALL RANDOM_NUMBER(rnum)
+            j = 1 + INT(rnum * REAL(i,dp))
+            ! swap perm(i) and perm(j)
+            aux = perm(i)
+            perm(i) = perm(j)
+            perm(j) = aux
+        END DO
+        ALLOCATE(selected(ncomb))
+        selected = .FALSE.
+        DO i = 1, sample_size
+            selected(perm(i)) = .TRUE.
+        END DO
+        max_checks = sample_size
+        DEALLOCATE(perm)
+        DEALLOCATE(seed)
     END IF
     checked_count = 0
     stop_now = .FALSE.
@@ -372,6 +434,11 @@ PROGRAM test_three_subs
     DO u1 = 1, Mm1-2
         DO u2 = u1+1, Mm1-1
             DO u3 = u2+1, Mm1
+                comb_idx = comb_idx + 1
+                ! If sampling, skip combinations not selected
+                IF (ALLOCATED(selected)) THEN
+                    IF (.NOT. selected(comb_idx)) CYCLE
+                END IF
                 ! positions (position indices taken from subpos list)
                 i = subpos(u1)
                 j = subpos(u2)
