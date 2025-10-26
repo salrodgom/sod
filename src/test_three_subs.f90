@@ -359,7 +359,12 @@ PROGRAM test_three_subs
     CLOSE(18)
 
     ! (conf3 contains representative triples expressed as position indices)
-    max_checks = 25
+    ! By default check all possible triples (Mm1 choose 3). This increases output compared to the previous hard-coded 25.
+    IF (Mm1 >= 3) THEN
+        max_checks = Mm1*(Mm1-1)*(Mm1-2)/6
+    ELSE
+        max_checks = 0
+    END IF
     checked_count = 0
     stop_now = .FALSE.
     WRITE(*,*) 'test_three_subs: iterating combinations and matching to n03 representatives...'
