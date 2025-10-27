@@ -428,6 +428,7 @@ PROGRAM test_three_subs
         DEALLOCATE(seed)
     END IF
     checked_count = 0
+    comb_idx = 0
     stop_now = .FALSE.
     WRITE(*,*) 'test_three_subs: iterating combinations and matching to n03 representatives...'
     ! Enumerate triples over substitutable positions (values in subpos)
