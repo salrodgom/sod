@@ -11,8 +11,14 @@ all:
 	$(f90comp) -o bin/gcstatsod  src/factorials.f90 src/momenta.f90 src/gcstatsod.f90
 	$(f90comp) -o bin/peaks2spec  src/peaks2spec.f90
 	$(f90comp) -c src/energy_calc.f90
-	$(f90comp) -c src/mc_sampler.f90
-	$(f90comp) -o bin/sod_mc energy_calc.o mc_sampler.o src/sod_mc.f90
+	$(f90comp) -o bin/sod_boltzmann_mc src/sod_boltzmann_mc.f90 energy_calc.o
+#	$(f90comp) -c src/mc_sampler.f90
+#	$(f90comp) -o bin/sod_mc energy_calc.o mc_sampler.o src/sod_mc.f90
+	rm -f *.o *.mod
+
+sod_boltzmann_mc: src/sod_boltzmann_mc.f90 src/energy_calc.f90
+	$(f90comp) -c src/energy_calc.f90
+	$(f90comp) -o bin/sod_boltzmann_mc src/sod_boltzmann_mc.f90 energy_calc.o
 	rm -f *.o *.mod
 
 clean:
@@ -23,6 +29,7 @@ clean:
 	rm bin/genersod
 	rm bin/spbesod
 	rm bin/peaks2spec
+	rm bin/sod_boltzmann_mc
 	rm bin/sod_mc
 
 

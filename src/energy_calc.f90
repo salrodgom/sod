@@ -1,5 +1,5 @@
 !*******************************************************************************
-!    Copyright (c) 2025 
+!    Copyright (c) 2025, Salvador R.G. Balestra
 !
 !    This file is part of the SOD package.
 !
@@ -27,6 +27,16 @@ MODULE energy_calc
     INTEGER, ALLOCATABLE, PRIVATE :: dE3_i(:), dE3_j(:), dE3_k(:)
     REAL(dp), ALLOCATABLE, PRIVATE :: dE3_val(:)
     INTEGER, PRIVATE :: n_dE3 = 0
+    ! Complementary expansion (starting from all-Ge reference)
+    REAL(dp), PRIVATE :: E0_high = 0.0_dp
+    LOGICAL, PRIVATE :: high_base_loaded = .false.
+    REAL(dp), ALLOCATABLE, PRIVATE :: hE1(:), hE2(:,:)
+    INTEGER, ALLOCATABLE, PRIVATE :: hE3_i(:), hE3_j(:), hE3_k(:)
+    REAL(dp), ALLOCATABLE, PRIVATE :: hE3_val(:)
+    INTEGER, PRIVATE :: n_h_dE3 = 0
+    ! Book-keeping for expansion orders available
+    INTEGER, PRIVATE :: max_low_order = 0
+    INTEGER, PRIVATE :: max_high_order = 0
     INTEGER, PRIVATE :: npos              ! Number of positions
     INTEGER, PRIVATE :: nop               ! Number of operators
     INTEGER, ALLOCATABLE, PRIVATE :: eqmatrix(:,:) ! Symmetry operations
@@ -81,7 +91,19 @@ MODULE energy_calc
     INTEGER, ALLOCATABLE :: spat1r(:)
     REAL(dp) :: coordstemp(3)
         
-        WRITE(*,*) 'init_energy_calc: start'
+    max_low_order = 0
+    max_high_order = 0
+    E0_high = 0.0_dp
+    high_base_loaded = .false.
+    n_h_dE3 = 0
+    IF (ALLOCATED(hE1)) DEALLOCATE(hE1)
+    IF (ALLOCATED(hE2)) DEALLOCATE(hE2)
+    IF (ALLOCATED(hE3_i)) DEALLOCATE(hE3_i)
+    IF (ALLOCATED(hE3_j)) DEALLOCATE(hE3_j)
+    IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
+    IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
+
+    WRITE(*,*) 'init_energy_calc: start'
         ! Read SGO file first to get symmetry operations
         OPEN(UNIT=21, FILE='SGO', STATUS='OLD', IOSTAT=io_stat)
         IF (io_stat /= 0) THEN
@@ -460,10 +482,10 @@ MODULE energy_calc
     WRITE(*,*) 'init_energy_calc: finished reading OUTSOD1 mappings, read m=', m
     CLOSE(15)
 
-        ! Store substitution site -> position mapping for MC (use representatives from OUTSOD1)
-        IF (ALLOCATED(subpos)) DEALLOCATE(subpos)
-        ALLOCATE(subpos(Mm1))
-        subpos = conf1
+    ! Store substitution site -> position mapping for MC using the full set of Si positions
+    IF (ALLOCATED(subpos)) DEALLOCATE(subpos)
+    ALLOCATE(subpos(npos))
+    subpos = [(i, i=1, npos)]
         
     WRITE(*,*) 'init_energy_calc: reading n01/ENERGIES'
     ! Read ENERGIES1 from n01/ENERGIES
@@ -477,6 +499,7 @@ MODULE energy_calc
         END DO
     WRITE(*,*) 'init_energy_calc: finished reading ENERGIES1'
     CLOSE(11)
+    max_low_order = MAX(max_low_order, 1)
         
         ! Calculate dE1 - single substitution energies
         dE1 = 0.0_dp
@@ -539,6 +562,7 @@ MODULE energy_calc
         END DO
     WRITE(*,*) 'init_energy_calc: finished reading ENERGIES2'
     CLOSE(12)
+    max_low_order = MAX(max_low_order, 2)
         
         ! Calculate dE2 - pair interaction energies
         dE2 = 0.0_dp
@@ -612,6 +636,7 @@ MODULE energy_calc
                     READ(18,*) energies3(m)
                 END DO
                 CLOSE(18)
+                max_low_order = MAX(max_low_order, 3)
 
                 ! Build sparse dE3: lists of ordered triples (i<j<k) and values
                 IF (ALLOCATED(dE3_i)) THEN
@@ -730,6 +755,8 @@ MODULE energy_calc
         ! If no three-body data, do nothing (dE3 remains unallocated)
     END IF
 
+    CALL load_high_order_expansion()
+
     ! Log summary of computed terms
     cnt1 = COUNT(ABS(dE1) > 1.0E-12_dp)
     cnt2 = 0
@@ -738,7 +765,16 @@ MODULE energy_calc
             IF (ABS(dE2(i,j)) > 1.0E-12_dp) cnt2 = cnt2 + 1
         END DO
     END DO
-    WRITE(*,*) 'init_energy_calc: summary: npos=', npos, 'nop=', nop, 'nonzero dE1=', cnt1, 'nonzero dE2_pairs=', cnt2, 'dE3_triples=', n_dE3
+    WRITE(*,'(A,I0,A,I0,A,I0,A,I0,A,I0)') 'init_energy_calc: summary: npos=', npos, &
+        ', nop=', nop, ', nonzero dE1=', cnt1, ', nonzero dE2_pairs=', cnt2, &
+        ', dE3_triples=', n_dE3
+    WRITE(*,'(A,I0)') 'init_energy_calc: low-side max order = ', max_low_order
+    IF (high_base_loaded) THEN
+        WRITE(*,'(A,F12.6,A,I0)') 'init_energy_calc: high-side E0 = ', E0_high, &
+            ', max hole order = ', max_high_order
+    ELSE
+        WRITE(*,'(A)') 'init_energy_calc: high-side cluster data not available'
+    END IF
     DEALLOCATE(conf1, conf2, omega1, omega2, energies1, energies2)
     IF (ALLOCATED(conf3)) DEALLOCATE(conf3)
     IF (ALLOCATED(omega3)) DEALLOCATE(omega3)
@@ -746,17 +782,320 @@ MODULE energy_calc
         
     END SUBROUTINE init_energy_calc
 
-    SUBROUTINE calculate_structure_energy(config, n_sites, energy)
+    SUBROUTINE load_high_order_expansion()
+        IMPLICIT NONE
+        CHARACTER(len=32) :: dirname
+        CHARACTER(len=256) :: filename
+        INTEGER :: hole_count, ge_count, io_stat
+
+    IF (npos <= 0) RETURN
+    IF (.NOT. ALLOCATED(eqmatrix)) RETURN
+        IF (.NOT. find_cluster_dir(npos, dirname)) RETURN
+
+        filename = TRIM(dirname)//'/ENERGIES'
+        OPEN(UNIT=24, FILE=TRIM(filename), STATUS='OLD', IOSTAT=io_stat)
+        IF (io_stat /= 0) THEN
+            WRITE(*,*) 'load_high_order_expansion: cannot open ', TRIM(filename)
+            RETURN
+        END IF
+        READ(24,*,IOSTAT=io_stat) E0_high
+        CLOSE(24)
+        IF (io_stat /= 0) THEN
+            WRITE(*,*) 'load_high_order_expansion: failed reading ', TRIM(filename)
+            E0_high = 0.0_dp
+            RETURN
+        END IF
+        high_base_loaded = .true.
+
+        IF (ALLOCATED(hE1)) DEALLOCATE(hE1)
+        IF (ALLOCATED(hE2)) DEALLOCATE(hE2)
+        IF (ALLOCATED(hE3_i)) DEALLOCATE(hE3_i)
+        IF (ALLOCATED(hE3_j)) DEALLOCATE(hE3_j)
+        IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
+        IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
+        n_h_dE3 = 0
+        max_high_order = 0
+
+        DO hole_count = 1, MIN(3, npos)
+            ge_count = npos - hole_count
+            IF (ge_count < 0) EXIT
+            IF (.NOT. find_cluster_dir(ge_count, dirname)) CYCLE
+            CALL process_high_level(TRIM(dirname), ge_count, hole_count)
+            max_high_order = MAX(max_high_order, hole_count)
+        END DO
+    END SUBROUTINE load_high_order_expansion
+
+    SUBROUTINE process_high_level(dirname, ge_count, hole_count)
+        IMPLICIT NONE
+        CHARACTER(len=*), INTENT(IN) :: dirname
+        INTEGER, INTENT(IN) :: ge_count, hole_count
+        CHARACTER(len=256) :: filename, line
+        INTEGER :: io_stat, Mm, m, aux, omega_tmp
+        INTEGER, ALLOCATABLE :: hole_conf(:,:)
+        REAL(dp), ALLOCATABLE :: energies(:)
+        INTEGER, ALLOCATABLE :: ge_positions(:)
+        LOGICAL, ALLOCATABLE :: is_ge(:)
+    INTEGER, ALLOCATABLE :: tmpi(:), tmpj(:), tmpk(:)
+    REAL(dp), ALLOCATABLE :: tmpv(:)
+        INTEGER :: j, hole_idx
+        INTEGER :: denom, op
+        INTEGER :: mapped_i, mapped_j, mapped_k
+        INTEGER :: ii, jj, kk, idx, found_idx
+        REAL(dp) :: contrib
+        LOGICAL :: exists
+
+        IF (hole_count <= 0) RETURN
+
+        filename = TRIM(dirname)//'/OUTSOD'
+        INQUIRE(FILE=TRIM(filename), EXIST=exists)
+        IF (.NOT. exists) RETURN
+        OPEN(UNIT=25, FILE=TRIM(filename), STATUS='OLD', IOSTAT=io_stat)
+        IF (io_stat /= 0) THEN
+            WRITE(*,*) 'process_high_level: cannot open ', TRIM(filename)
+            RETURN
+        END IF
+
+        Mm = 0
+        DO
+            READ(25,'(A)',IOSTAT=io_stat) line
+            IF (io_stat /= 0) EXIT
+            IF (INDEX(line,'configuration') /= 0) THEN
+                READ(line,*,IOSTAT=io_stat) Mm
+                IF (io_stat == 0) EXIT
+            END IF
+        END DO
+        IF (Mm <= 0) THEN
+            CLOSE(25)
+            RETURN
+        END IF
+
+        ALLOCATE(hole_conf(Mm, hole_count))
+        ALLOCATE(energies(Mm))
+        ALLOCATE(ge_positions(MAX(ge_count,1)))
+        ALLOCATE(is_ge(npos))
+
+        REWIND(25)
+        m = 0
+        DO
+            READ(25,'(A)',IOSTAT=io_stat) line
+            IF (io_stat /= 0) EXIT
+            IF (TRIM(line) == '') CYCLE
+            IF (line(1:1) == '#') CYCLE
+            omega_tmp = 0
+            ge_positions = 0
+            READ(line,*,IOSTAT=io_stat) aux, omega_tmp, (ge_positions(j), j=1, ge_count)
+            IF (io_stat /= 0) CYCLE
+            IF (omega_tmp <= 0) omega_tmp = 1
+            m = m + 1
+            is_ge = .FALSE.
+            DO j = 1, ge_count
+                IF (ge_positions(j) >= 1 .AND. ge_positions(j) <= npos) THEN
+                    is_ge(ge_positions(j)) = .TRUE.
+                END IF
+            END DO
+            hole_idx = 0
+            DO j = 1, npos
+                IF (.NOT. is_ge(j)) THEN
+                    hole_idx = hole_idx + 1
+                    IF (hole_idx <= hole_count) hole_conf(m, hole_idx) = j
+                END IF
+            END DO
+            IF (hole_idx /= hole_count) THEN
+                WRITE(*,*) 'Warning: inconsistent high-level configuration in ', TRIM(dirname)
+            END IF
+            IF (m == Mm) EXIT
+        END DO
+        CLOSE(25)
+        DEALLOCATE(is_ge)
+        DEALLOCATE(ge_positions)
+
+        filename = TRIM(dirname)//'/ENERGIES'
+        OPEN(UNIT=26, FILE=TRIM(filename), STATUS='OLD', IOSTAT=io_stat)
+        IF (io_stat /= 0) THEN
+            WRITE(*,*) 'process_high_level: cannot open ', TRIM(filename)
+            DEALLOCATE(hole_conf, energies)
+            RETURN
+        END IF
+        DO m = 1, Mm
+            READ(26,*,IOSTAT=io_stat) energies(m)
+            IF (io_stat /= 0) EXIT
+        END DO
+        CLOSE(26)
+        IF (io_stat /= 0) THEN
+            DEALLOCATE(hole_conf, energies)
+            RETURN
+        END IF
+
+        SELECT CASE (hole_count)
+        CASE (1)
+            IF (.NOT. ALLOCATED(hE1)) THEN
+                ALLOCATE(hE1(npos))
+            END IF
+            hE1 = 0.0_dp
+            DO m = 1, Mm
+                DO op = 1, nop
+                    mapped_i = eqmatrix(op, hole_conf(m,1))
+                    denom = COUNT(eqmatrix(:, hole_conf(m,1)) == mapped_i)
+                    IF (denom <= 0) CYCLE
+                    contrib = (energies(m) - E0_high) / REAL(denom, dp)
+                    hE1(mapped_i) = hE1(mapped_i) + contrib
+                END DO
+            END DO
+        CASE (2)
+            IF (.NOT. ALLOCATED(hE1)) THEN
+                DEALLOCATE(hole_conf, energies)
+                RETURN
+            END IF
+            IF (.NOT. ALLOCATED(hE2)) THEN
+                ALLOCATE(hE2(npos,npos))
+            END IF
+            hE2 = 0.0_dp
+            DO m = 1, Mm
+                DO op = 1, nop
+                    mapped_i = eqmatrix(op, hole_conf(m,1))
+                    mapped_j = eqmatrix(op, hole_conf(m,2))
+                    IF (mapped_i < mapped_j) THEN
+                        denom = COUNT(eqmatrix(:, hole_conf(m,1)) == mapped_i .AND. &
+                                      eqmatrix(:, hole_conf(m,2)) == mapped_j)
+                        IF (denom <= 0) CYCLE
+                        contrib = energies(m) - E0_high - hE1(mapped_i) - hE1(mapped_j)
+                        contrib = contrib / REAL(denom, dp)
+                        hE2(mapped_i, mapped_j) = hE2(mapped_i, mapped_j) + contrib
+                        hE2(mapped_j, mapped_i) = hE2(mapped_i, mapped_j)
+                    END IF
+                END DO
+            END DO
+        CASE (3)
+            IF (.NOT. ALLOCATED(hE1) .OR. .NOT. ALLOCATED(hE2)) THEN
+                DEALLOCATE(hole_conf, energies)
+                RETURN
+            END IF
+            IF (ALLOCATED(hE3_i)) THEN
+                DEALLOCATE(hE3_i, hE3_j, hE3_k, hE3_val)
+            END IF
+            n_h_dE3 = 0
+            DO m = 1, Mm
+                DO op = 1, nop
+                    mapped_i = eqmatrix(op, hole_conf(m,1))
+                    mapped_j = eqmatrix(op, hole_conf(m,2))
+                    mapped_k = eqmatrix(op, hole_conf(m,3))
+                    IF (mapped_i == mapped_j .OR. mapped_i == mapped_k .OR. mapped_j == mapped_k) CYCLE
+                    ii = MIN(mapped_i, MIN(mapped_j, mapped_k))
+                    kk = MAX(mapped_i, MAX(mapped_j, mapped_k))
+                    jj = mapped_i + mapped_j + mapped_k - ii - kk
+                    denom = COUNT(eqmatrix(:, hole_conf(m,1)) == eqmatrix(op, hole_conf(m,1)) .AND. &
+                                  eqmatrix(:, hole_conf(m,2)) == eqmatrix(op, hole_conf(m,2)) .AND. &
+                                  eqmatrix(:, hole_conf(m,3)) == eqmatrix(op, hole_conf(m,3)))
+                    IF (denom <= 0) CYCLE
+                    contrib = energies(m) - E0_high - hE1(ii) - hE1(jj) - hE1(kk) - &
+                              (hE2(MIN(ii,jj),MAX(ii,jj)) + hE2(MIN(ii,kk),MAX(ii,kk)) + hE2(MIN(jj,kk),MAX(jj,kk)))
+                    contrib = contrib / REAL(denom, dp)
+                    found_idx = 0
+                    IF (n_h_dE3 > 0 .AND. ALLOCATED(hE3_i)) THEN
+                        DO idx = 1, n_h_dE3
+                            IF (hE3_i(idx) == ii .AND. hE3_j(idx) == jj .AND. hE3_k(idx) == kk) THEN
+                                hE3_val(idx) = hE3_val(idx) + contrib
+                                found_idx = 1
+                                EXIT
+                            END IF
+                        END DO
+                    END IF
+                    IF (found_idx == 0) THEN
+                        IF (.NOT. ALLOCATED(hE3_i)) THEN
+                            ALLOCATE(hE3_i(1), hE3_j(1), hE3_k(1), hE3_val(1))
+                            n_h_dE3 = 1
+                            hE3_i(1) = ii
+                            hE3_j(1) = jj
+                            hE3_k(1) = kk
+                            hE3_val(1) = contrib
+                        ELSE
+                            ALLOCATE(tmpi(n_h_dE3+1), tmpj(n_h_dE3+1), tmpk(n_h_dE3+1), tmpv(n_h_dE3+1))
+                            tmpi(1:n_h_dE3) = hE3_i(1:n_h_dE3)
+                            tmpj(1:n_h_dE3) = hE3_j(1:n_h_dE3)
+                            tmpk(1:n_h_dE3) = hE3_k(1:n_h_dE3)
+                            tmpv(1:n_h_dE3) = hE3_val(1:n_h_dE3)
+                            tmpi(n_h_dE3+1) = ii
+                            tmpj(n_h_dE3+1) = jj
+                            tmpk(n_h_dE3+1) = kk
+                            tmpv(n_h_dE3+1) = contrib
+                            n_h_dE3 = n_h_dE3 + 1
+                            DEALLOCATE(hE3_i, hE3_j, hE3_k, hE3_val)
+                            ALLOCATE(hE3_i(n_h_dE3), hE3_j(n_h_dE3), hE3_k(n_h_dE3), hE3_val(n_h_dE3))
+                            hE3_i = tmpi
+                            hE3_j = tmpj
+                            hE3_k = tmpk
+                            hE3_val = tmpv
+                            DEALLOCATE(tmpi, tmpj, tmpk, tmpv)
+                        END IF
+                    END IF
+                END DO
+            END DO
+        END SELECT
+
+        WRITE(*,*) 'load_high_order_expansion: processed holes=', hole_count, ' from ', TRIM(dirname)
+
+        DEALLOCATE(hole_conf, energies)
+    END SUBROUTINE process_high_level
+
+    LOGICAL FUNCTION find_cluster_dir(level, dirname)
+        IMPLICIT NONE
+        INTEGER, INTENT(IN) :: level
+        CHARACTER(len=*), INTENT(OUT) :: dirname
+        CHARACTER(len=32) :: candidate
+        LOGICAL :: exists
+
+        dirname = ''
+
+        WRITE(candidate,'("n",I2.2)') level
+        candidate = TRIM(ADJUSTL(candidate))
+        INQUIRE(FILE=TRIM(candidate)//'/OUTSOD', EXIST=exists)
+        IF (.NOT. exists) INQUIRE(FILE=TRIM(candidate)//'/ENERGIES', EXIST=exists)
+        IF (exists) THEN
+            dirname = TRIM(candidate)
+            find_cluster_dir = .TRUE.
+            RETURN
+        END IF
+
+        WRITE(candidate,'("n",I3.3)') level
+        candidate = TRIM(ADJUSTL(candidate))
+        INQUIRE(FILE=TRIM(candidate)//'/OUTSOD', EXIST=exists)
+        IF (.NOT. exists) INQUIRE(FILE=TRIM(candidate)//'/ENERGIES', EXIST=exists)
+        IF (exists) THEN
+            dirname = TRIM(candidate)
+            find_cluster_dir = .TRUE.
+            RETURN
+        END IF
+
+        WRITE(candidate,'(A,I0)') 'n', level
+        candidate = TRIM(ADJUSTL(candidate))
+        INQUIRE(FILE=TRIM(candidate)//'/OUTSOD', EXIST=exists)
+        IF (.NOT. exists) INQUIRE(FILE=TRIM(candidate)//'/ENERGIES', EXIST=exists)
+        IF (exists) THEN
+            dirname = TRIM(candidate)
+            find_cluster_dir = .TRUE.
+        ELSE
+            find_cluster_dir = .FALSE.
+        END IF
+    END FUNCTION find_cluster_dir
+
+    SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, energy_high_side)
         IMPLICIT NONE
         INTEGER, INTENT(IN) :: n_sites
         INTEGER, INTENT(IN) :: config(n_sites)
         REAL(dp), INTENT(OUT) :: energy
-    INTEGER :: i, j, k, op
-    INTEGER :: mapped_i, mapped_j, mapped_k
-    INTEGER :: ii, jj, kk, idx
-        REAL(dp) :: min_energy
+        REAL(dp), INTENT(OUT), OPTIONAL :: energy_low_side
+        REAL(dp), INTENT(OUT), OPTIONAL :: energy_high_side
+        INTEGER :: i, j, k, op
+        INTEGER :: mapped_i, mapped_j, mapped_k
+        INTEGER :: ii, jj, kk, idx
+        REAL(dp) :: min_energy_low, min_energy_high, energy_tmp, energy_high_tmp
+        REAL(dp) :: huge_val
+        INTEGER :: nge, nsi
+        LOGICAL :: can_use_high
         
-        min_energy = HUGE(1.0_dp)
+        huge_val = HUGE(1.0_dp)
+        min_energy_low = huge_val
+        min_energy_high = huge_val
         
         ! Ensure we have a site->position mapping
         IF (.NOT. ALLOCATED(subpos)) THEN
@@ -768,15 +1107,20 @@ MODULE energy_calc
             STOP
         END IF
 
+        nge = COUNT(config == 2)
+        nsi = n_sites - nge
+        can_use_high = high_base_loaded
+        IF (nsi > 0 .AND. .NOT. ALLOCATED(hE1)) can_use_high = .FALSE.
+
         ! Try all symmetry operations to find the lowest energy
         DO op = 1, nop
-            energy = E0
+            energy_tmp = E0
             
-            ! Add one-body terms
+            ! Add one-body terms (Ge substitutions)
             DO i = 1, n_sites
-                IF (config(i) == 2) THEN  ! Only count substituted sites
+                IF (config(i) == 2) THEN
                     mapped_i = eqmatrix(op, subpos(i))
-                    energy = energy + dE1(mapped_i)
+                    energy_tmp = energy_tmp + dE1(mapped_i)
                 END IF
             END DO
             
@@ -787,9 +1131,9 @@ MODULE energy_calc
                         mapped_i = eqmatrix(op, subpos(i))
                         mapped_j = eqmatrix(op, subpos(j))
                         IF (mapped_i < mapped_j) THEN
-                            energy = energy + dE2(mapped_i,mapped_j)
+                            energy_tmp = energy_tmp + dE2(mapped_i,mapped_j)
                         ELSE
-                            energy = energy + dE2(mapped_j,mapped_i)
+                            energy_tmp = energy_tmp + dE2(mapped_j,mapped_i)
                         END IF
                     END IF
                 END DO
@@ -804,15 +1148,13 @@ MODULE energy_calc
                                 mapped_i = eqmatrix(op, subpos(i))
                                 mapped_j = eqmatrix(op, subpos(j))
                                 mapped_k = eqmatrix(op, subpos(k))
-                                ! canonical ordered triple
                                 ii = MIN(mapped_i, MIN(mapped_j,mapped_k))
                                 kk = MAX(mapped_i, MAX(mapped_j,mapped_k))
                                 jj = mapped_i + mapped_j + mapped_k - ii - kk
-                                ! search sparse list
                                 IF (n_dE3 > 0) THEN
                                     DO idx = 1, n_dE3
                                         IF (dE3_i(idx) == ii .AND. dE3_j(idx) == jj .AND. dE3_k(idx) == kk) THEN
-                                            energy = energy + dE3_val(idx)
+                                            energy_tmp = energy_tmp + dE3_val(idx)
                                             EXIT
                                         END IF
                                     END DO
@@ -822,12 +1164,81 @@ MODULE energy_calc
                     END DO
                 END DO
             END IF
-            
-            ! Keep track of minimum energy
-            min_energy = MIN(min_energy, energy)
+
+            min_energy_low = MIN(min_energy_low, energy_tmp)
+
+            IF (can_use_high) THEN
+                energy_high_tmp = E0_high
+                IF (nsi > 0 .AND. ALLOCATED(hE1)) THEN
+                    DO i = 1, n_sites
+                        IF (config(i) == 1) THEN
+                            mapped_i = eqmatrix(op, subpos(i))
+                            energy_high_tmp = energy_high_tmp + hE1(mapped_i)
+                        END IF
+                    END DO
+                END IF
+                IF (nsi > 1 .AND. ALLOCATED(hE2)) THEN
+                    DO i = 1, n_sites
+                        IF (config(i) /= 1) CYCLE
+                        mapped_i = eqmatrix(op, subpos(i))
+                        DO j = i+1, n_sites
+                            IF (config(j) /= 1) CYCLE
+                            mapped_j = eqmatrix(op, subpos(j))
+                            IF (mapped_i < mapped_j) THEN
+                                energy_high_tmp = energy_high_tmp + hE2(mapped_i, mapped_j)
+                            ELSE
+                                energy_high_tmp = energy_high_tmp + hE2(mapped_j, mapped_i)
+                            END IF
+                        END DO
+                    END DO
+                END IF
+                IF (nsi > 2 .AND. ALLOCATED(hE3_i) .AND. n_h_dE3 > 0) THEN
+                    DO i = 1, n_sites
+                        IF (config(i) /= 1) CYCLE
+                        DO j = i+1, n_sites
+                            IF (config(j) /= 1) CYCLE
+                            DO k = j+1, n_sites
+                                IF (config(k) /= 1) CYCLE
+                                mapped_i = eqmatrix(op, subpos(i))
+                                mapped_j = eqmatrix(op, subpos(j))
+                                mapped_k = eqmatrix(op, subpos(k))
+                                ii = MIN(mapped_i, MIN(mapped_j, mapped_k))
+                                kk = MAX(mapped_i, MAX(mapped_j, mapped_k))
+                                jj = mapped_i + mapped_j + mapped_k - ii - kk
+                                DO idx = 1, n_h_dE3
+                                    IF (hE3_i(idx) == ii .AND. hE3_j(idx) == jj .AND. hE3_k(idx) == kk) THEN
+                                        energy_high_tmp = energy_high_tmp + hE3_val(idx)
+                                        EXIT
+                                    END IF
+                                END DO
+                            END DO
+                        END DO
+                    END DO
+                END IF
+                min_energy_high = MIN(min_energy_high, energy_high_tmp)
+            END IF
         END DO
-        
-        energy = min_energy
+
+        IF (.NOT. can_use_high .OR. min_energy_high >= huge_val) THEN
+            energy = min_energy_low
+        ELSE
+            IF (nsi < nge) THEN
+                energy = min_energy_high
+            ELSEIF (nsi > nge) THEN
+                energy = min_energy_low
+            ELSE
+                energy = 0.5_dp * (min_energy_low + min_energy_high)
+            END IF
+        END IF
+
+        IF (PRESENT(energy_low_side)) energy_low_side = min_energy_low
+        IF (PRESENT(energy_high_side)) THEN
+            IF (.NOT. can_use_high) THEN
+                energy_high_side = huge_val
+            ELSE
+                energy_high_side = min_energy_high
+            END IF
+        END IF
         
     END SUBROUTINE calculate_structure_energy
 
@@ -851,6 +1262,17 @@ MODULE energy_calc
         IF (ALLOCATED(subpos)) DEALLOCATE(subpos)
         IF (ALLOCATED(spat1)) DEALLOCATE(spat1)
         IF (ALLOCATED(pos2coord)) DEALLOCATE(pos2coord)
+        IF (ALLOCATED(hE1)) DEALLOCATE(hE1)
+        IF (ALLOCATED(hE2)) DEALLOCATE(hE2)
+        IF (ALLOCATED(hE3_i)) DEALLOCATE(hE3_i)
+        IF (ALLOCATED(hE3_j)) DEALLOCATE(hE3_j)
+        IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
+        IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
+        n_h_dE3 = 0
+        E0_high = 0.0_dp
+        high_base_loaded = .false.
+        max_low_order = 0
+        max_high_order = 0
     ! conf3/omega3/energies3 are local to init_energy_calc and were deallocated there if needed
     END SUBROUTINE cleanup_energy_calc
     
@@ -859,9 +1281,8 @@ MODULE energy_calc
         INTEGER, INTENT(IN) :: n_sites
         INTEGER, INTENT(IN) :: config(n_sites)
         CHARACTER(len=*), INTENT(IN) :: filename
-    INTEGER :: i, j, n_written, idx_si, idx_ge
+    INTEGER :: i, j
     INTEGER :: n_ge_this ! Number of Ge in this configuration
-    LOGICAL :: is_substituted
     LOGICAL, ALLOCATABLE :: is_sub(:)
         
         ! Count number of Ge substitutions in this configuration
