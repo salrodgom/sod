@@ -1,3 +1,15 @@
+!*******************************************************************************
+!    Copyright (c) 2025, Salvador R.G. Balestra
+!
+!    This file is part of the SOD package.
+!
+!    SOD is free software: you can redistribute it and/or modify
+!    it under the terms of the GNU General Public License as published by
+!    the Free Software Foundation, either version 3 of the License, or
+!    (at your option) any later version.
+!
+!******************************************************************************
+
 module sod_boltzmann_consts
     use iso_fortran_env, only: real64, int64, error_unit
     implicit none
@@ -135,7 +147,7 @@ program sod_boltzmann_mc
     logical :: use_parallel
     logical :: omp_available
 
-    integer, allocatable :: eqmatrix(:,:), config(:)
+    integer, allocatable :: eqmatrix(:,:), config(:), local_config(:)
     integer :: nop, total_sites
     integer :: level, effective_max
 
@@ -153,7 +165,6 @@ program sod_boltzmann_mc
         write(*,'(A)') 'Error: no se pudo obtener EQMATRIX o el número de posiciones/operadores es inválido.'
         stop 1
     end if
-    allocate(config(total_sites))
     if (allocated(eqmatrix)) deallocate(eqmatrix)
 
     call init_summary_files(summary_unit, summary_txt_unit)
@@ -174,14 +185,34 @@ program sod_boltzmann_mc
     write(*,'(A)') '                               y: '//trim(summary_txt_filename)
     write(*,'(A)') 'Método de muestreo MC (si aplica): '//trim(sampling_mode)
     write(*,'(A)') 'OpenMP paralelo: '//merge('Si','No',use_parallel)
+    if (use_parallel) then
+        write(*,'(A)') 'Nota: las salidas por nivel pueden imprimirse en orden no secuencial durante el cálculo paralelo.'
+        write(*,'(A)') '      Los archivos de resumen se reordenan al finalizar para dejar los niveles crecientes.'
+    end if
     write(*,*)
 
-    do level = 0, effective_max
-    call process_level(level, total_sites, config, temperature, samples_per_level, &
-               max_exact_combos, sampling_mode, use_parallel, summary_unit, summary_txt_unit)
-    end do
+    if (use_parallel) then
+!$omp parallel default(shared) private(local_config)
+        allocate(local_config(total_sites))
+!$omp do schedule(dynamic)
+        do level = 0, effective_max
+            call process_level(level, total_sites, local_config, temperature, samples_per_level, &
+                max_exact_combos, sampling_mode, use_parallel, summary_unit, summary_txt_unit)
+        end do
+!$omp end do
+        deallocate(local_config)
+!$omp end parallel
+    else
+        allocate(config(total_sites))
+        do level = 0, effective_max
+            call process_level(level, total_sites, config, temperature, samples_per_level, &
+                max_exact_combos, sampling_mode, use_parallel, summary_unit, summary_txt_unit)
+        end do
+        deallocate(config)
+    end if
 
     call close_summary_files(summary_unit, summary_txt_unit)
+    call reorder_summary_outputs()
     call cleanup_energy_calc()
 
 contains
@@ -379,11 +410,11 @@ contains
             write(error_unit,'(A)') 'Error: no se pudo crear el archivo de resumen '//trim(summary_txt_filename)
             stop 1
         end if
-        write(unit_csv,'(A)') '#N;FracGe;E_exp_total;E_min_total;E_exp_ladoSi;E_min_ladoSi;'// &
+        write(unit_csv,'(A)') '#N;FracGe;E_exp_total;E_min_total;Var_total;E_exp_ladoSi;E_min_ladoSi;'// &
             'E_exp_ladoGe;E_min_ladoGe;E_exp_combinada;Delta_exp_total;Delta_min_total;'// &
             'Delta_exp_ladoSi;Delta_min_ladoSi;Delta_exp_ladoGe;Delta_min_ladoGe;Delta_exp_combinada;'// &
             'Ratio_aceptacion'
-        write(unit_txt,'(A)') '#N FracGe E_exp_total E_min_total E_exp_ladoSi E_min_ladoSi '// &
+        write(unit_txt,'(A)') '#N FracGe E_exp_total E_min_total Var_total E_exp_ladoSi E_min_ladoSi '// &
             'E_exp_ladoGe E_min_ladoGe E_exp_combinada Delta_exp_total Delta_min_total '// &
             'Delta_exp_ladoSi Delta_min_ladoSi Delta_exp_ladoGe Delta_min_ladoGe Delta_exp_combinada '// &
             'Ratio_aceptacion'
@@ -722,6 +753,7 @@ contains
     character(len=32) :: label_low, label_high
     character(len=32) :: exp_low_str, exp_high_str, mix_exp_str, frac_str
     character(len=32) :: exp_total_str, min_total_str
+    character(len=32) :: variance_str
     character(len=32) :: delta_exp_total_str, delta_min_total_str
     character(len=32) :: delta_exp_low_str, delta_min_low_str
     character(len=32) :: delta_exp_high_str, delta_min_high_str
@@ -881,8 +913,9 @@ contains
             write(mix_exp_str,'(F12.6)') expected_mix
         end if
 
-        write(exp_total_str,'(F12.6)') expected
+    write(exp_total_str,'(F12.6)') expected
         write(min_total_str,'(F12.6)') best_energy
+    write(variance_str,'(F12.6)') variance
         rel_exp_total = quartz_relative(level, total_sites, expected)
         rel_min_total = quartz_relative(level, total_sites, best_energy)
         write(delta_exp_total_str,'(F12.6)') rel_exp_total
@@ -912,21 +945,23 @@ contains
             accept_ratio = 1.0_dp
         end if
         write(accept_ratio_str,'(F12.6)') accept_ratio
+!$omp critical(summary_io)
         write(*,'(A)') separator
         write(*,'(A,I3)') 'Sustituciones (N): ', level
         write(*,'(A)') 'Combinaciones totales: '//trim(total_str)
         write(*,'(A,F10.0)') 'Configuraciones procesadas: ', processed
         write(*,'(A,I8)') 'Intentos descartados: ', max(skipped, 0)
         write(*,'(A,F12.6)') 'Energía mínima (eV): ', best_energy
-        write(*,'(A,F12.6)') 'Energía esperada <E> (eV): ', expected
-        write(*,'(A,F12.6)') 'Desviación estándar (eV): ', sqrt(variance)
+    write(*,'(A,F12.6)') 'Energía esperada <E> (eV): ', expected
+    write(*,'(A,F12.6)') 'Varianza respecto a <E> (eV^2): ', variance
+    write(*,'(A,F12.6)') 'Desviación estándar (eV): ', sqrt(variance)
         write(*,'(A,A)') 'Energía mínima lado Si (eV): ', trim(label_low)
         write(*,'(A,A)') 'Energía esperada lado Si (eV): ', trim(exp_low_str)
         write(*,'(A,A)') 'Energía mínima lado Ge (eV): ', trim(label_high)
         write(*,'(A,A)') 'Energía esperada lado Ge (eV): ', trim(exp_high_str)
         write(*,'(A,A)') 'Energía esperada combinada (eV): ', trim(mix_exp_str)
-    write(*,'(A,F10.6)') 'Probabilidad Boltzmann del mínimo: ', prob_best
-    write(*,'(A,F8.4)') 'Ratio de aceptación: ', accept_ratio
+        write(*,'(A,F10.6)') 'Probabilidad Boltzmann del mínimo: ', prob_best
+        write(*,'(A,F8.4)') 'Ratio de aceptación: ', accept_ratio
         call print_best_positions(best_positions, best_count)
         call save_best_structure_poscar(level, total_sites, best_positions, best_count)
         if (processed < real(total_comb, dp)) then
@@ -939,7 +974,7 @@ contains
             //trim(exp_high_str)//'; '//trim(label_high)
         if (summary_unit /= 0) then
             csv_line = trim(adjustl(level_str))//';'//trim(adjustl(frac_str))//';'//trim(adjustl(exp_total_str))//';'// &
-                trim(adjustl(min_total_str))//';'//trim(adjustl(exp_low_str))//';'//trim(adjustl(label_low))//';'// &
+                trim(adjustl(min_total_str))//';'//trim(adjustl(variance_str))//';'//trim(adjustl(exp_low_str))//';'//trim(adjustl(label_low))//';'// &
                 trim(adjustl(exp_high_str))//';'//trim(adjustl(label_high))//';'//trim(adjustl(mix_exp_str))//';'// &
                 trim(adjustl(delta_exp_total_str))//';'//trim(adjustl(delta_min_total_str))//';'// &
                 trim(adjustl(delta_exp_low_str))//';'//trim(adjustl(delta_min_low_str))//';'// &
@@ -949,7 +984,7 @@ contains
         end if
         if (summary_txt_unit /= 0) then
             txt_line = trim(adjustl(level_str))//' '//trim(adjustl(frac_str))//' '// &
-                trim(adjustl(exp_total_str))//' '//trim(adjustl(min_total_str))//' '// &
+                trim(adjustl(exp_total_str))//' '//trim(adjustl(min_total_str))//' '//trim(adjustl(variance_str))//' '// &
                 trim(adjustl(exp_low_str))//' '//trim(adjustl(label_low))//' '// &
                 trim(adjustl(exp_high_str))//' '//trim(adjustl(label_high))//' '// &
                 trim(adjustl(mix_exp_str))//' '//trim(adjustl(delta_exp_total_str))//' '// &
@@ -959,8 +994,156 @@ contains
                 trim(adjustl(accept_ratio_str))
             write(summary_txt_unit,'(A)') trim(txt_line)
         end if
+!$omp end critical(summary_io)
         deallocate(weights)
     end subroutine summarize_level
+
+    subroutine reorder_summary_outputs()
+        call reorder_single_summary(summary_filename, ';')
+        call reorder_single_summary(summary_txt_filename, ' ')
+    end subroutine reorder_summary_outputs
+
+    subroutine reorder_single_summary(filename, delimiter)
+        character(len=*), intent(in) :: filename
+        character(len=1), intent(in) :: delimiter
+    integer :: unit, ios, raw_count, idx, level_val
+        character(len=512) :: header_line
+        character(len=512) :: line
+        character(len=512), allocatable :: lines(:)
+    integer, allocatable :: levels(:)
+    integer :: actual_count
+
+        open(newunit=unit, file=filename, status='old', action='read', iostat=ios)
+        if (ios /= 0) then
+            return
+        end if
+
+        read(unit,'(A)',iostat=ios) header_line
+        if (ios /= 0) then
+            close(unit)
+            return
+        end if
+
+        raw_count = 0
+        do
+            read(unit,'(A)',iostat=ios) line
+            if (ios /= 0) exit
+            if (len_trim(line) == 0) cycle
+            raw_count = raw_count + 1
+        end do
+
+        if (raw_count <= 1) then
+            close(unit)
+            return
+        end if
+
+        rewind(unit)
+        read(unit,'(A)',iostat=ios) header_line
+        if (ios /= 0) then
+            close(unit)
+            return
+        end if
+
+        allocate(lines(raw_count))
+        allocate(levels(raw_count))
+        actual_count = 0
+        do
+            read(unit,'(A)',iostat=ios) line
+            if (ios /= 0) exit
+            if (len_trim(line) == 0) cycle
+            level_val = extract_level_from_line(line, delimiter)
+            if (level_val == huge(1)) cycle
+            actual_count = actual_count + 1
+            lines(actual_count) = trim(line)
+            levels(actual_count) = level_val
+        end do
+        close(unit)
+
+        if (actual_count <= 1) then
+            deallocate(lines, levels)
+            return
+        end if
+
+        call sort_lines_by_level(levels, lines, actual_count)
+
+        open(newunit=unit, file=filename, status='replace', action='write', iostat=ios)
+        if (ios /= 0) then
+            deallocate(lines, levels)
+            return
+        end if
+
+        write(unit,'(A)') trim(header_line)
+        do idx = 1, actual_count
+            write(unit,'(A)') trim(lines(idx))
+        end do
+        close(unit)
+        deallocate(lines, levels)
+    end subroutine reorder_single_summary
+
+    integer function extract_level_from_line(line, delimiter) result(level_val)
+        character(len=*), intent(in) :: line
+        character(len=1), intent(in) :: delimiter
+        character(len=512) :: buffer
+        character(len=64) :: token
+        integer :: pos, ios, lt, i
+
+        buffer = adjustl(line)
+        lt = len_trim(buffer)
+        if (lt == 0) then
+            level_val = huge(1)
+            return
+        end if
+
+        if (delimiter == ' ') then
+            pos = 0
+            do i = 1, lt
+                if (buffer(i:i) == ' ' .or. buffer(i:i) == char(9)) then
+                    pos = i
+                    exit
+                end if
+            end do
+            if (pos == 0) then
+                pos = lt + 1
+            end if
+        else
+            pos = index(buffer(1:lt), delimiter)
+            if (pos == 0) then
+                pos = lt + 1
+            end if
+        end if
+
+        if (pos <= 1) then
+            token = buffer(1:lt)
+        else
+            token = buffer(1:pos-1)
+        end if
+
+        read(token,*,iostat=ios) level_val
+        if (ios /= 0) then
+            level_val = huge(1)
+        end if
+    end function extract_level_from_line
+
+    subroutine sort_lines_by_level(levels, lines, n)
+        integer, intent(inout) :: levels(:)
+        character(len=*), intent(inout) :: lines(:)
+        integer, intent(in) :: n
+        integer :: i, j, key_level
+        character(len=512) :: key_line
+
+        do i = 2, n
+            key_level = levels(i)
+            key_line = lines(i)
+            j = i - 1
+            do while (j >= 1 .and. levels(j) > key_level)
+                levels(j+1) = levels(j)
+                lines(j+1) = lines(j)
+                j = j - 1
+            end do
+            levels(j+1) = key_level
+            lines(j+1) = key_line
+        end do
+    end subroutine sort_lines_by_level
 
     real(dp) function quartz_relative(level, total_sites, energy) result(rel_val)
         integer, intent(in) :: level, total_sites
