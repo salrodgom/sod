@@ -1,0 +1,1275 @@
+********************************************************************************
+*                       GENERAL UTILITY LATTICE PROGRAM                        *
+*                                 Julian Gale                                  *
+*                       Curtin Institute for Computation                       *
+*                    School of Molecular and Life Sciences                     *
+*                    Curtin University, Western Australia                      *
+********************************************************************************
+* Version = 6.1.2 * Last modified =   3rd November 2022                        *
+********************************************************************************
+*  optimise     - perform optimisation run                                     *
+*  conp         - constant pressure calculation                                *
+*  property     - calculate properties for final geometry                      *
+********************************************************************************
+
+  Job Started  at 12:24.58 31st October    2025                               
+
+  Number of CPUs =     1
+
+
+  Total number of configurations input =      1
+
+********************************************************************************
+*  Input for Configuration =   1 : c00189.vasp                                 *
+********************************************************************************
+
+  Formula = Ge20Si4O48                                                  
+
+  Number of irreducible atoms/shells =     120
+
+
+  Total number atoms/shells =     120
+
+  Dimensionality = 3               :  Bulk   
+
+
+
+  Cartesian lattice vectors (Angstroms) :
+
+       17.182800    0.000000    0.000000
+        0.000000    7.513760    0.000000
+        0.000000    0.000000   10.447700
+
+  Cell parameters (Angstroms/Degrees):
+
+  a =      17.1828    alpha =  90.0000
+  b =       7.5138    beta  =  90.0000
+  c =      10.4477    gamma =  90.0000
+
+  Initial cell volume =        1348.875752 Angs**3
+
+  Temperature of configuration =   0.00     K 
+
+  Pressure of configuration =         0.000 GPa 
+
+  Fractional coordinates of asymmetric unit :
+
+--------------------------------------------------------------------------------
+   No.  Atomic       x           y          z         Charge      Occupancy
+        Label      (Frac)      (Frac)     (Frac)        (e)         (Frac)  
+--------------------------------------------------------------------------------
+      1 Ge    c    0.052090    0.000000    0.372270     4.00000    1.000000    
+      2 Ge    c    0.447910 *  0.000000 *  0.372270 *   4.00000    1.000000    
+      3 Ge    c    0.947910 *  0.000000 *  0.627730 *   4.00000    1.000000    
+      4 Ge    c    0.552090 *  0.000000 *  0.627730 *   4.00000    1.000000    
+      5 Ge    c    0.556730 *  0.000000 *  0.122130 *   4.00000    1.000000    
+      6 Ge    c    0.943270 *  0.000000 *  0.122130 *   4.00000    1.000000    
+      7 Ge    c    0.443270 *  0.000000 *  0.877870 *   4.00000    1.000000    
+      8 Ge    c    0.056730 *  0.000000 *  0.877870 *   4.00000    1.000000    
+      9 Ge    c    0.160190 *  0.293910 *  0.273440 *   4.00000    1.000000    
+     10 Ge    c    0.339810 *  0.706090 *  0.273440 *   4.00000    1.000000    
+     11 Ge    c    0.839810 *  0.293910 *  0.726560 *   4.00000    1.000000    
+     12 Ge    c    0.839810 *  0.706090 *  0.726560 *   4.00000    1.000000    
+     13 Ge    c    0.160190 *  0.706090 *  0.273440 *   4.00000    1.000000    
+     14 Ge    c    0.660660 *  0.294090 *  0.017440 *   4.00000    1.000000    
+     15 Ge    c    0.839340 *  0.705910 *  0.017440 *   4.00000    1.000000    
+     16 Ge    c    0.160660 *  0.705910 *  0.982560 *   4.00000    1.000000    
+     17 Ge    c    0.339340 *  0.705910 *  0.982560 *   4.00000    1.000000    
+     18 Ge    c    0.160660 *  0.294090 *  0.982560 *   4.00000    1.000000    
+     19 Ge    c    0.660660 *  0.705910 *  0.017440 *   4.00000    1.000000    
+     20 Ge    c    0.839340 *  0.294090 *  0.017440 *   4.00000    1.000000    
+     21 Si    c    0.660190 *  0.706090 *  0.726560 *   4.00000    1.000000    
+     22 Si    c    0.660190 *  0.293910 *  0.726560 *   4.00000    1.000000    
+     23 Si    c    0.339810 *  0.293910 *  0.273440 *   4.00000    1.000000    
+     24 Si    c    0.339340 *  0.294090 *  0.982560 *   4.00000    1.000000    
+     25 O1    c    0.106570 *  0.174340 *  0.366200 *   1.73396    1.000000    
+     26 O1    c    0.393430 *  0.825660 *  0.366200 *   1.73396    1.000000    
+     27 O1    c    0.893430 *  0.174340 *  0.633800 *   1.73396    1.000000    
+     28 O3    c    0.606570 *  0.825660 *  0.633800 *   1.33043    1.000000    
+     29 O1    c    0.893430 *  0.825660 *  0.633800 *   1.73396    1.000000    
+     30 O3    c    0.606570 *  0.174340 *  0.633800 *   1.33043    1.000000    
+     31 O1    c    0.106570 *  0.825660 *  0.366200 *   1.73396    1.000000    
+     32 O3    c    0.393430 *  0.174340 *  0.366200 *   1.33043    1.000000    
+     33 O1    c    0.000000 *  0.000000 *  0.500000 *   1.73396    1.000000    
+     34 O1    c    0.500000 *  0.000000 *  0.500000 *   1.73396    1.000000    
+     35 O1    c    0.994520 *  0.000000 *  0.250840 *   1.73396    1.000000    
+     36 O1    c    0.505480 *  0.000000 *  0.250840 *   1.73396    1.000000    
+     37 O1    c    0.005480 *  0.000000 *  0.749160 *   1.73396    1.000000    
+     38 O1    c    0.494520 *  0.000000 *  0.749160 *   1.73396    1.000000    
+     39 O1    c    0.610230 *  0.175520 *  0.115390 *   1.73396    1.000000    
+     40 O1    c    0.889770 *  0.824480 *  0.115390 *   1.73396    1.000000    
+     41 O3    c    0.389770 *  0.175520 *  0.884610 *   1.33043    1.000000    
+     42 O1    c    0.110230 *  0.824480 *  0.884610 *   1.73396    1.000000    
+     43 O1    c    0.389770 *  0.824480 *  0.884610 *   1.73396    1.000000    
+     44 O1    c    0.110230 *  0.175520 *  0.884610 *   1.73396    1.000000    
+     45 O1    c    0.610230 *  0.824480 *  0.115390 *   1.73396    1.000000    
+     46 O1    c    0.889770 *  0.175520 *  0.115390 *   1.73396    1.000000    
+     47 O1    c    0.500000 *  0.000000 *  0.000000 *   1.73396    1.000000    
+     48 O1    c    0.000000 *  0.000000 *  0.000000 *   1.73396    1.000000    
+     49 O1    c    0.151750 *  0.500000 *  0.313330 *   1.73396    1.000000    
+     50 O3    c    0.348250 *  0.500000 *  0.313330 *   1.33043    1.000000    
+     51 O1    c    0.848250 *  0.500000 *  0.686670 *   1.73396    1.000000    
+     52 O2    c    0.651750 *  0.500000 *  0.686670 *   0.87073    1.000000    
+     53 O3    c    0.250000 *  0.234950 *  0.285720 *   1.33043    1.000000    
+     54 O1    c    0.250000 *  0.765050 *  0.285720 *   1.73396    1.000000    
+     55 O3    c    0.750000 *  0.234950 *  0.714280 *   1.33043    1.000000    
+     56 O3    c    0.750000 *  0.765050 *  0.714280 *   1.33043    1.000000    
+     57 O1    c    0.131410 *  0.268650 *  0.127790 *   1.73396    1.000000    
+     58 O1    c    0.368590 *  0.731350 *  0.127790 *   1.73396    1.000000    
+     59 O1    c    0.868590 *  0.268650 *  0.872210 *   1.73396    1.000000    
+     60 O3    c    0.631410 *  0.731350 *  0.872210 *   1.33043    1.000000    
+     61 O1    c    0.868590 *  0.731350 *  0.872210 *   1.73396    1.000000    
+     62 O3    c    0.631410 *  0.268650 *  0.872210 *   1.33043    1.000000    
+     63 O1    c    0.131410 *  0.731350 *  0.127790 *   1.73396    1.000000    
+     64 O2    c    0.368590 *  0.268650 *  0.127790 *   0.87073    1.000000    
+     65 O1    c    0.653920 *  0.500000 *  0.058200 *   1.73396    1.000000    
+     66 O1    c    0.846080 *  0.500000 *  0.058200 *   1.73396    1.000000    
+     67 O3    c    0.346080 *  0.500000 *  0.941800 *   1.33043    1.000000    
+     68 O1    c    0.153920 *  0.500000 *  0.941800 *   1.73396    1.000000    
+     69 O1    c    0.750000 *  0.231060 *  0.027050 *   1.73396    1.000000    
+     70 O1    c    0.750000 *  0.768940 *  0.027050 *   1.73396    1.000000    
+     71 O3    c    0.250000 *  0.231060 *  0.972950 *   1.33043    1.000000    
+     72 O1    c    0.250000 *  0.768940 *  0.972950 *   1.73396    1.000000    
+     73 O1    s    0.106570 *  0.174340 *  0.366200 *  -3.73396    1.000000    
+     74 O1    s    0.393430 *  0.825660 *  0.366200 *  -3.73396    1.000000    
+     75 O1    s    0.893430 *  0.174340 *  0.633800 *  -3.73396    1.000000    
+     76 O3    s    0.606570 *  0.825660 *  0.633800 *  -3.33043    1.000000    
+     77 O1    s    0.893430 *  0.825660 *  0.633800 *  -3.73396    1.000000    
+     78 O3    s    0.606570 *  0.174340 *  0.633800 *  -3.33043    1.000000    
+     79 O1    s    0.106570 *  0.825660 *  0.366200 *  -3.73396    1.000000    
+     80 O3    s    0.393430 *  0.174340 *  0.366200 *  -3.33043    1.000000    
+     81 O1    s    0.000000 *  0.000000 *  0.500000 *  -3.73396    1.000000    
+     82 O1    s    0.500000 *  0.000000 *  0.500000 *  -3.73396    1.000000    
+     83 O1    s    0.994520 *  0.000000 *  0.250840 *  -3.73396    1.000000    
+     84 O1    s    0.505480 *  0.000000 *  0.250840 *  -3.73396    1.000000    
+     85 O1    s    0.005480 *  0.000000 *  0.749160 *  -3.73396    1.000000    
+     86 O1    s    0.494520 *  0.000000 *  0.749160 *  -3.73396    1.000000    
+     87 O1    s    0.610230 *  0.175520 *  0.115390 *  -3.73396    1.000000    
+     88 O1    s    0.889770 *  0.824480 *  0.115390 *  -3.73396    1.000000    
+     89 O3    s    0.389770 *  0.175520 *  0.884610 *  -3.33043    1.000000    
+     90 O1    s    0.110230 *  0.824480 *  0.884610 *  -3.73396    1.000000    
+     91 O1    s    0.389770 *  0.824480 *  0.884610 *  -3.73396    1.000000    
+     92 O1    s    0.110230 *  0.175520 *  0.884610 *  -3.73396    1.000000    
+     93 O1    s    0.610230 *  0.824480 *  0.115390 *  -3.73396    1.000000    
+     94 O1    s    0.889770 *  0.175520 *  0.115390 *  -3.73396    1.000000    
+     95 O1    s    0.500000 *  0.000000 *  0.000000 *  -3.73396    1.000000    
+     96 O1    s    0.000000 *  0.000000 *  0.000000 *  -3.73396    1.000000    
+     97 O1    s    0.151750 *  0.500000 *  0.313330 *  -3.73396    1.000000    
+     98 O3    s    0.348250 *  0.500000 *  0.313330 *  -3.33043    1.000000    
+     99 O1    s    0.848250 *  0.500000 *  0.686670 *  -3.73396    1.000000    
+    100 O2    s    0.651750 *  0.500000 *  0.686670 *  -2.87073    1.000000    
+    101 O3    s    0.250000 *  0.234950 *  0.285720 *  -3.33043    1.000000    
+    102 O1    s    0.250000 *  0.765050 *  0.285720 *  -3.73396    1.000000    
+    103 O3    s    0.750000 *  0.234950 *  0.714280 *  -3.33043    1.000000    
+    104 O3    s    0.750000 *  0.765050 *  0.714280 *  -3.33043    1.000000    
+    105 O1    s    0.131410 *  0.268650 *  0.127790 *  -3.73396    1.000000    
+    106 O1    s    0.368590 *  0.731350 *  0.127790 *  -3.73396    1.000000    
+    107 O1    s    0.868590 *  0.268650 *  0.872210 *  -3.73396    1.000000    
+    108 O3    s    0.631410 *  0.731350 *  0.872210 *  -3.33043    1.000000    
+    109 O1    s    0.868590 *  0.731350 *  0.872210 *  -3.73396    1.000000    
+    110 O3    s    0.631410 *  0.268650 *  0.872210 *  -3.33043    1.000000    
+    111 O1    s    0.131410 *  0.731350 *  0.127790 *  -3.73396    1.000000    
+    112 O2    s    0.368590 *  0.268650 *  0.127790 *  -2.87073    1.000000    
+    113 O1    s    0.653920 *  0.500000 *  0.058200 *  -3.73396    1.000000    
+    114 O1    s    0.846080 *  0.500000 *  0.058200 *  -3.73396    1.000000    
+    115 O3    s    0.346080 *  0.500000 *  0.941800 *  -3.33043    1.000000    
+    116 O1    s    0.153920 *  0.500000 *  0.941800 *  -3.73396    1.000000    
+    117 O1    s    0.750000 *  0.231060 *  0.027050 *  -3.73396    1.000000    
+    118 O1    s    0.750000 *  0.768940 *  0.027050 *  -3.73396    1.000000    
+    119 O3    s    0.250000 *  0.231060 *  0.972950 *  -3.33043    1.000000    
+    120 O1    s    0.250000 *  0.768940 *  0.972950 *  -3.73396    1.000000    
+--------------------------------------------------------------------------------
+
+
+
+********************************************************************************
+*  General input information                                                   *
+********************************************************************************
+
+  Species output for all configurations : 
+
+--------------------------------------------------------------------------------
+  Species    Type    Atomic    Atomic    Charge       Radii (Angs)     Library
+                     Number     Mass       (e)     Cova   Ionic  VDW   Symbol
+--------------------------------------------------------------------------------
+    Ge       Core       32      72.61   4.000000   1.170  0.000  1.750 Ge       
+    Si       Core       14      28.09   4.000000   1.200  0.000  2.100 Si       
+    O1       Core        8      16.00   1.733957   0.730  0.000  1.360 O1       
+    O2       Core        8      16.00   0.870733   0.730  0.000  1.360 O2       
+    O3       Core        8      16.00   1.330431   0.730  0.000  1.360 O3       
+    O1       Shell       8       0.00  -3.733957   0.730  0.000  0.000 O1       
+    O2       Shell       8       0.00  -2.870733   0.730  0.000  0.000 O2       
+    O3       Shell       8       0.00  -3.330431   0.730  0.000  0.000 O3       
+--------------------------------------------------------------------------------
+
+
+  Lattice summation method               =    Ewald          (3-D)
+                                         =    Parry          (2-D)
+                                         =    Saunders et al (1-D)
+  Accuracy factor for lattice sums       =   12.000
+
+
+  Analytic derivatives to be used
+
+  Time limit = Infinity
+
+  Maximum range for interatomic potentials =    100000.000000 Angstroms
+
+  General interatomic potentials :
+
+--------------------------------------------------------------------------------
+Atom  Types   Potential      Parameter       Value         Units   Cutoffs(Ang)
+  1     2                                                            Min /  Max 
+--------------------------------------------------------------------------------
+Si   c O1   s Buckingham    Buckingham A     1315.2478    eV        0.000 16.000
+                            Buckingham rho  0.31775900    Ang       
+                            Buckingham C     10.141118    eV*Ang^6  
+--------------------------------------------------------------------------------
+Si   c O2   s Buckingham    Buckingham A     1315.2478    eV        0.000 16.000
+                            Buckingham rho  0.31775900    Ang       
+                            Buckingham C     10.141118    eV*Ang^6  
+--------------------------------------------------------------------------------
+Si   c O3   s Buckingham    Buckingham A     1315.2478    eV        0.000 16.000
+                            Buckingham rho  0.31775900    Ang       
+                            Buckingham C     10.141118    eV*Ang^6  
+--------------------------------------------------------------------------------
+Ge   c O1   s Buckingham    Buckingham A     1497.3996    eV        0.000 16.000
+                            Buckingham rho  0.32564600    Ang       
+                            Buckingham C     16.808599    eV*Ang^6  
+--------------------------------------------------------------------------------
+Ge   c O2   s Buckingham    Buckingham A     1497.3996    eV        0.000 16.000
+                            Buckingham rho  0.32564600    Ang       
+                            Buckingham C     16.808599    eV*Ang^6  
+--------------------------------------------------------------------------------
+Ge   c O3   s Buckingham    Buckingham A     1497.3996    eV        0.000 16.000
+                            Buckingham rho  0.32564600    Ang       
+                            Buckingham C     16.808599    eV*Ang^6  
+--------------------------------------------------------------------------------
+O1   s O1   s Buckingham    Buckingham A     22764.000    eV        0.000 16.000
+                            Buckingham rho  0.14900000    Ang       
+                            Buckingham C     10.937044    eV*Ang^6  
+--------------------------------------------------------------------------------
+O1   s O2   s Buckingham    Buckingham A     22764.000    eV        0.000 16.000
+                            Buckingham rho  0.14900000    Ang       
+                            Buckingham C     10.937044    eV*Ang^6  
+--------------------------------------------------------------------------------
+O1   s O3   s Buckingham    Buckingham A     22764.000    eV        0.000 16.000
+                            Buckingham rho  0.14900000    Ang       
+                            Buckingham C     10.937044    eV*Ang^6  
+--------------------------------------------------------------------------------
+O2   s O2   s Buckingham    Buckingham A     22764.000    eV        0.000 16.000
+                            Buckingham rho  0.14900000    Ang       
+                            Buckingham C     10.937044    eV*Ang^6  
+--------------------------------------------------------------------------------
+O2   s O3   s Buckingham    Buckingham A     22764.000    eV        0.000 16.000
+                            Buckingham rho  0.14900000    Ang       
+                            Buckingham C     10.937044    eV*Ang^6  
+--------------------------------------------------------------------------------
+O3   s O3   s Buckingham    Buckingham A     22764.000    eV        0.000 16.000
+                            Buckingham rho  0.14900000    Ang       
+                            Buckingham C     10.937044    eV*Ang^6  
+--------------------------------------------------------------------------------
+O1   c O1   s Spring (c-s)  Spring k 2       180.31577    eV*Ang^-2 0.000  0.800
+                            Spring k 4       0.0000000    eV*Ang^-4 
+--------------------------------------------------------------------------------
+O2   c O2   s Spring (c-s)  Spring k 2       75.969800    eV*Ang^-2 0.000  0.800
+                            Spring k 4       0.0000000    eV*Ang^-4 
+--------------------------------------------------------------------------------
+O3   c O3   s Spring (c-s)  Spring k 2       128.14270    eV*Ang^-2 0.000  0.800
+                            Spring k 4       0.0000000    eV*Ang^-4 
+--------------------------------------------------------------------------------
+
+  General Three-body potentials :
+
+--------------------------------------------------------------------------------
+  Atoms       Potential      Parameter       Value         Units   Cutoffs(Ang)
+  1 / 2 / 3                                                          Min /  Max 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O1    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+O1    shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O1    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(1   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+õ(1   shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(1   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O1    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+O2    shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O1    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(2   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O2    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(1   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+õ(1   shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(2   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O2    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+O2    shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+O2    shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(2   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+Si    core    Harmonic      Three-body cnst  1.2614000    eV*rad^-2 0.000  1.900
+õ(2   shel                  Three-body angl  109.47000    degrees   0.000  1.900
+õ(2   shel                  Three-body k4    0.0000000    eV*rad^-4 0.000  3.500
+                            Three-body k3    0.0000000    eV*rad^-3 
+--------------------------------------------------------------------------------
+
+********************************************************************************
+*  Output for configuration   1 : c00189.vasp                                  *
+********************************************************************************
+
+
+  Components of energy : 
+
+--------------------------------------------------------------------------------
+  Interatomic potentials     =         896.65210922 eV    
+  Three-body potentials      =           0.00000000 eV    
+  Monopole - monopole (real) =       -2676.00317478 eV    
+  Monopole - monopole (recip)=       -1115.35404472 eV    
+  Monopole - monopole (total)=       -3791.35721950 eV    
+--------------------------------------------------------------------------------
+  Total lattice energy       =       -2894.70511029 eV    
+--------------------------------------------------------------------------------
+  Total lattice energy       =         -279294.7935 kJ/(mole unit cells)
+--------------------------------------------------------------------------------
+
+
+  Number of variables =      363
+
+  Maximum number of calculations  =          1000
+  Maximum Hessian update interval =            10
+  Maximum step size               =   0.100000000
+  Maximum parameter tolerance     =   0.000010000
+  Maximum function  tolerance     =   0.000010000
+  Maximum gradient  tolerance     =   0.001000000
+  Maximum gradient  component     =   0.010000000
+
+  Symmetry not applied to optimisation
+
+  Cell parameters to be optimised using strains
+
+  Newton-Raphson optimiser to be used
+
+  BFGS hessian update to be used
+
+  Lower half triangular hessian to be used
+
+  Minimiser to switch to RFO
+  When gradient norm is less than     0.050000
+
+  Dumpfile to be written after every cycle
+
+  Start of bulk optimisation :
+
+  Cycle:      0 Energy:     -2894.705110  Gnorm:      5.786201  CPU:    0.129
+  ** Hessian calculated **
+  Cycle:      1 Energy:     -2938.165577  Gnorm:      1.380949  CPU:    0.279
+  ** Hessian calculated **
+  Cycle:      2 Energy:     -2942.897843  Gnorm:      0.667410  CPU:    0.485
+  Cycle:      3 Energy:     -2943.837469  Gnorm:      0.382600  CPU:    0.591
+  Cycle:      4 Energy:     -2944.359613  Gnorm:      0.327529  CPU:    0.712
+  Cycle:      5 Energy:     -2945.039407  Gnorm:      0.270629  CPU:    0.841
+  Cycle:      6 Energy:     -2945.756932  Gnorm:      0.234311  CPU:    0.964
+  Cycle:      7 Energy:     -2946.104184  Gnorm:      0.156983  CPU:    1.077
+  Cycle:      8 Energy:     -2946.242885  Gnorm:      0.116016  CPU:    1.218
+  Cycle:      9 Energy:     -2946.313694  Gnorm:      0.093927  CPU:    1.342
+  Cycle:     10 Energy:     -2946.359448  Gnorm:      0.084191  CPU:    1.468
+  Cycle:     11 Energy:     -2946.401607  Gnorm:      0.081492  CPU:    1.595
+  ** Hessian calculated **
+  Cycle:     12 Energy:     -2946.434376  Gnorm:      0.079056  CPU:    1.823
+  Cycle:     13 Energy:     -2946.488175  Gnorm:      0.074865  CPU:    1.965
+  Cycle:     14 Energy:     -2946.554587  Gnorm:      0.069243  CPU:    2.087
+  Cycle:     15 Energy:     -2946.656617  Gnorm:      0.059356  CPU:    2.233
+  Cycle:     16 Energy:     -2946.749170  Gnorm:      0.048345  CPU:    2.355
+  ** Hessian has wrong structure
+  ** Imaginary eigenvectors =   7
+  Cycle:     17 Energy:     -2946.820432  Gnorm:      0.096282  CPU:    2.682
+  ** Hessian has wrong structure
+  ** Imaginary eigenvectors =   5
+  ** Hessian has wrong structure
+  ** Imaginary eigenvectors =   4
+  Cycle:     18 Energy:     -2946.868999  Gnorm:      0.115776  CPU:    3.253
+  ** Hessian has wrong structure
+  ** Imaginary eigenvectors =   3
+  ** Hessian has wrong structure
+  ** Imaginary eigenvectors =   2
+  Cycle:     19 Energy:     -2946.967608  Gnorm:      0.168645  CPU:    3.706
+  ** Hessian has required structure
+  Cycle:     20 Energy:     -2947.380736  Gnorm:      0.111742  CPU:    4.001
+  ** Hessian has required structure
+  Cycle:     21 Energy:     -2947.564543  Gnorm:      0.066401  CPU:    4.175
+  ** Hessian has required structure
+  Cycle:     22 Energy:     -2947.670706  Gnorm:      0.055369  CPU:    4.352
+  ** Hessian has required structure
+  Cycle:     23 Energy:     -2947.699307  Gnorm:      0.051691  CPU:    4.507
+  ** Hessian has required structure
+  Cycle:     24 Energy:     -2947.733442  Gnorm:      0.041708  CPU:    4.680
+  ** Hessian has required structure
+  Cycle:     25 Energy:     -2947.748675  Gnorm:      0.028358  CPU:    4.853
+  ** Hessian has required structure
+  Cycle:     26 Energy:     -2947.756320  Gnorm:      0.024377  CPU:    5.027
+  ** Hessian has required structure
+  Cycle:     27 Energy:     -2947.762161  Gnorm:      0.017977  CPU:    5.199
+  ** Hessian has required structure
+  Cycle:     28 Energy:     -2947.765498  Gnorm:      0.013434  CPU:    5.371
+  ** Hessian has required structure
+  Cycle:     29 Energy:     -2947.767937  Gnorm:      0.017225  CPU:    5.570
+  ** Hessian has required structure
+  Cycle:     30 Energy:     -2947.773237  Gnorm:      0.010162  CPU:    5.866
+  ** Hessian has required structure
+  Cycle:     31 Energy:     -2947.775511  Gnorm:      0.006344  CPU:    6.045
+  ** Hessian has required structure
+  Cycle:     32 Energy:     -2947.776508  Gnorm:      0.003861  CPU:    6.256
+  ** Hessian has required structure
+  Cycle:     33 Energy:     -2947.776836  Gnorm:      0.002651  CPU:    6.445
+  ** Hessian has required structure
+  Cycle:     34 Energy:     -2947.776933  Gnorm:      0.001779  CPU:    6.608
+  ** Hessian has required structure
+  Cycle:     35 Energy:     -2947.776983  Gnorm:      0.001206  CPU:    6.809
+  ** Hessian has required structure
+  Cycle:     36 Energy:     -2947.776998  Gnorm:      0.000609  CPU:    7.008
+  ** Hessian has required structure
+  Cycle:     37 Energy:     -2947.777001  Gnorm:      0.000543  CPU:    7.168
+  ** Hessian has required structure
+  Cycle:     38 Energy:     -2947.777001  Gnorm:      0.000546  CPU:    7.464
+  ** Hessian has required structure
+  Cycle:     39 Energy:     -2947.777001  Gnorm:      0.000542  CPU:    7.685
+  ** Hessian has required structure
+  Cycle:     40 Energy:     -2947.777001  Gnorm:      0.000542  CPU:    8.005
+  ** Hessian calculated **
+  Cycle:     41 Energy:     -2947.777001  Gnorm:      0.000241  CPU:    8.200
+  ** Hessian has required structure
+  Cycle:     42 Energy:     -2947.777002  Gnorm:      0.000484  CPU:    8.360
+  ** Hessian has required structure
+  Cycle:     43 Energy:     -2947.777002  Gnorm:      0.000443  CPU:    8.519
+  ** Hessian has required structure
+  Cycle:     44 Energy:     -2947.777002  Gnorm:      0.000412  CPU:    8.676
+  ** Hessian has required structure
+  Cycle:     45 Energy:     -2947.777002  Gnorm:      0.000355  CPU:    8.832
+  ** Hessian has required structure
+  Cycle:     46 Energy:     -2947.777002  Gnorm:      0.000355  CPU:    8.990
+  ** Hessian has required structure
+  Cycle:     47 Energy:     -2947.777002  Gnorm:      0.000332  CPU:    9.146
+  ** Hessian has required structure
+  Cycle:     48 Energy:     -2947.777002  Gnorm:      0.000312  CPU:    9.297
+  ** Hessian has required structure
+  Cycle:     49 Energy:     -2947.777002  Gnorm:      0.000279  CPU:    9.451
+  ** Hessian has required structure
+  Cycle:     50 Energy:     -2947.777002  Gnorm:      0.000267  CPU:    9.606
+  ** Hessian has required structure
+  Cycle:     51 Energy:     -2947.777002  Gnorm:      0.000266  CPU:    9.884
+  ** Hessian has required structure
+  Cycle:     52 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   10.043
+  ** Hessian has required structure
+  Cycle:     53 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   10.208
+  ** Hessian has required structure
+  Cycle:     54 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   10.370
+  ** Hessian has required structure
+  Cycle:     55 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   10.525
+  ** Hessian has required structure
+  Cycle:     56 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   10.688
+  ** Hessian has required structure
+  Cycle:     57 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   10.847
+  ** Hessian has required structure
+  Cycle:     58 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   11.002
+  ** Hessian has required structure
+  Cycle:     59 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   11.217
+  ** Hessian has required structure
+  ** Hessian has required structure
+  Cycle:     60 Energy:     -2947.777002  Gnorm:      0.000265  CPU:   11.597
+  ** Hessian calculated **
+  Cycle:     61 Energy:     -2947.777002  Gnorm:      0.000092  CPU:   11.788
+  ** Hessian has required structure
+  Cycle:     62 Energy:     -2947.777002  Gnorm:      0.000127  CPU:   11.933
+  ** Hessian has required structure
+  Cycle:     63 Energy:     -2947.777002  Gnorm:      0.000177  CPU:   12.080
+  ** Hessian has required structure
+  Cycle:     64 Energy:     -2947.777002  Gnorm:      0.000182  CPU:   12.227
+  ** Hessian has required structure
+  Cycle:     65 Energy:     -2947.777002  Gnorm:      0.000185  CPU:   12.373
+  ** Hessian has required structure
+  Cycle:     66 Energy:     -2947.777002  Gnorm:      0.000215  CPU:   12.521
+  ** Hessian has required structure
+  Cycle:     67 Energy:     -2947.777002  Gnorm:      0.000229  CPU:   12.714
+  ** Hessian has required structure
+  Cycle:     68 Energy:     -2947.777002  Gnorm:      0.000221  CPU:   12.861
+  ** Hessian has required structure
+  Cycle:     69 Energy:     -2947.777002  Gnorm:      0.000211  CPU:   13.008
+  ** Hessian has required structure
+  Cycle:     70 Energy:     -2947.777002  Gnorm:      0.000206  CPU:   13.152
+  ** Hessian has required structure
+  Cycle:     71 Energy:     -2947.777002  Gnorm:      0.000207  CPU:   13.523
+  ** Hessian has required structure
+  Cycle:     72 Energy:     -2947.777002  Gnorm:      0.000207  CPU:   13.681
+  ** Hessian has required structure
+  Cycle:     73 Energy:     -2947.777002  Gnorm:      0.000207  CPU:   13.839
+  ** Hessian has required structure
+  Cycle:     74 Energy:     -2947.777002  Gnorm:      0.000207  CPU:   13.996
+  ** Hessian has required structure
+  Cycle:     75 Energy:     -2947.777002  Gnorm:      0.000207  CPU:   14.154
+  ** Hessian has required structure
+  Cycle:     76 Energy:     -2947.777002  Gnorm:      0.000206  CPU:   14.311
+  ** Hessian has required structure
+  Cycle:     77 Energy:     -2947.777002  Gnorm:      0.000206  CPU:   14.459
+  ** Hessian has required structure
+  Cycle:     78 Energy:     -2947.777002  Gnorm:      0.000206  CPU:   14.608
+  ** Hessian has required structure
+  Cycle:     79 Energy:     -2947.777002  Gnorm:      0.000206  CPU:   14.764
+  ** Hessian has required structure
+
+
+  **** Too many failed attempts to optimise ****
+
+  Final energy =   -2947.77700246 eV      
+  Final Gnorm  =       0.00020630
+
+  Components of energy : 
+
+--------------------------------------------------------------------------------
+  Interatomic potentials     =         777.38283425 eV    
+  Three-body potentials      =           0.00000000 eV    
+  Monopole - monopole (real) =       -1578.69061659 eV    
+  Monopole - monopole (recip)=       -2146.46922012 eV    
+  Monopole - monopole (total)=       -3725.15983671 eV    
+--------------------------------------------------------------------------------
+  Total lattice energy       =       -2947.77700246 eV    
+--------------------------------------------------------------------------------
+  Total lattice energy       =         -284415.4198 kJ/(mole unit cells)
+--------------------------------------------------------------------------------
+
+  Final fractional coordinates of atoms :
+
+--------------------------------------------------------------------------------
+   No.  Atomic        x           y          z          Radius
+        Label       (Frac)      (Frac)     (Frac)       (Angs) 
+--------------------------------------------------------------------------------
+     1  Ge    c     0.052090    0.000000    0.372270    0.000000
+     2  Ge    c     0.448452    0.032123    0.372337    0.000000
+     3  Ge    c     0.943171    0.995554    0.616034    0.000000
+     4  Ge    c     0.551384    0.035489    0.631947    0.000000
+     5  Ge    c     0.550514    0.029815    0.118177    0.000000
+     6  Ge    c     0.952904    0.007331    0.111445    0.000000
+     7  Ge    c     0.442567    0.020679    0.874999    0.000000
+     8  Ge    c     0.055628    0.992412    0.862522    0.000000
+     9  Ge    c     0.175074    0.272105    0.297028    0.000000
+    10  Ge    c     0.329731    0.747494    0.292434    0.000000
+    11  Ge    c     0.823504    0.281357    0.732460    0.000000
+    12  Ge    c     0.842659    0.688011    0.722170    0.000000
+    13  Ge    c     0.150315    0.683459    0.292175    0.000000
+    14  Ge    c     0.647673    0.346143    0.041882    0.000000
+    15  Ge    c     0.852450    0.691358    0.035731    0.000000
+    16  Ge    c     0.147303    0.674210    0.981454    0.000000
+    17  Ge    c     0.327963    0.736392    0.985376    0.000000
+    18  Ge    c     0.176565    0.263288    0.984023    0.000000
+    19  Ge    c     0.675022    0.759849    0.041949    0.000000
+    20  Ge    c     0.826111    0.280979    0.042364    0.000000
+    21  Si    c     0.667106    0.745177    0.738454    0.000000
+    22  Si    c     0.647387    0.342879    0.741418    0.000000
+    23  Si    c     0.347950    0.342580    0.296786    0.000000
+    24  Si    c     0.350195    0.332471    0.995374    0.000000
+    25  O1    c     0.125577    0.140962    0.394492    0.000000
+    26  O1    c     0.380155    0.879133    0.392539    0.000000
+    27  O1    c     0.869502    0.133055    0.642484    0.000000
+    28  O3    c     0.614646    0.867462    0.652927    0.000000
+    29  O1    c     0.906123    0.794033    0.631380    0.000000
+    30  O3    c     0.591413    0.236928    0.650999    0.000000
+    31  O1    c     0.088195    0.795636    0.384875    0.000000
+    32  O3    c     0.410695    0.239241    0.375788    0.000000
+    33  O1    c     0.975255    0.028161    0.464192    0.000000
+    34  O1    c     0.522454    0.019242    0.475560    0.000000
+    35  O1    c     0.024245    0.039230    0.216553    0.000000
+    36  O1    c     0.481427    0.991203    0.222053    0.000000
+    37  O1    c     0.022288    0.021183    0.709794    0.000000
+    38  O1    c     0.471399    0.024413    0.719688    0.000000
+    39  O1    c     0.582596    0.238089    0.127878    0.000000
+    40  O1    c     0.920556    0.799295    0.119134    0.000000
+    41  O3    c     0.414467    0.224089    0.928257    0.000000
+    42  O1    c     0.082206    0.782055    0.889964    0.000000
+    43  O1    c     0.373133    0.869774    0.883185    0.000000
+    44  O1    c     0.134484    0.115270    0.887811    0.000000
+    45  O1    c     0.627842    0.896355    0.138287    0.000000
+    46  O1    c     0.877901    0.144260    0.135088    0.000000
+    47  O1    c     0.518615    0.971315    0.968205    0.000000
+    48  O1    c     0.984852    0.053047    0.961127    0.000000
+    49  O1    c     0.159085    0.479386    0.348249    0.000000
+    50  O3    c     0.339498    0.535676    0.346384    0.000000
+    51  O1    c     0.839011    0.480888    0.668662    0.000000
+    52  O2    c     0.656543    0.542632    0.700023    0.000000
+    53  O3    c     0.271032    0.235999    0.308029    0.000000
+    54  O1    c     0.235221    0.789943    0.293948    0.000000
+    55  O3    c     0.727734    0.248219    0.736287    0.000000
+    56  O3    c     0.754445    0.786186    0.718458    0.000000
+    57  O1    c     0.148530    0.247456    0.139476    0.000000
+    58  O1    c     0.360019    0.770573    0.138479    0.000000
+    59  O1    c     0.855689    0.270455    0.886569    0.000000
+    60  O3    c     0.644588    0.772430    0.883836    0.000000
+    61  O1    c     0.875854    0.691195    0.876829    0.000000
+    62  O3    c     0.616332    0.336226    0.883862    0.000000
+    63  O1    c     0.117627    0.677859    0.136849    0.000000
+    64  O2    c     0.368908    0.352706    0.146681    0.000000
+    65  O1    c     0.659499    0.551534    0.092768    0.000000
+    66  O1    c     0.841322    0.489516    0.094043    0.000000
+    67  O3    c     0.342912    0.523029    0.938950    0.000000
+    68  O1    c     0.154764    0.466272    0.929222    0.000000
+    69  O1    c     0.732434    0.238093    0.050095    0.000000
+    70  O1    c     0.768736    0.802560    0.046822    0.000000
+    71  O3    c     0.272648    0.230040    0.977826    0.000000
+    72  O1    c     0.233299    0.773631    0.978185    0.000000
+    73  O1    s     0.124022    0.140775    0.385421    0.000000
+    74  O1    s     0.381368    0.880416    0.383542    0.000000
+    75  O1    s     0.871521    0.134262    0.647637    0.000000
+    76  O3    s     0.614882    0.868565    0.659922    0.000000
+    77  O1    s     0.904050    0.801242    0.637180    0.000000
+    78  O3    s     0.593880    0.231745    0.658533    0.000000
+    79  O1    s     0.090088    0.802596    0.377142    0.000000
+    80  O3    s     0.407345    0.233671    0.367740    0.000000
+    81  O1    s     0.978925    0.023486    0.468265    0.000000
+    82  O1    s     0.518704    0.021556    0.479176    0.000000
+    83  O1    s     0.020493    0.033733    0.219399    0.000000
+    84  O1    s     0.484646    0.997532    0.224822    0.000000
+    85  O1    s     0.018931    0.017094    0.714321    0.000000
+    86  O1    s     0.475287    0.025020    0.724691    0.000000
+    87  O1    s     0.585209    0.231120    0.120679    0.000000
+    88  O1    s     0.917753    0.806254    0.112300    0.000000
+    89  O3    s     0.410022    0.219759    0.931097    0.000000
+    90  O1    s     0.085189    0.789323    0.894869    0.000000
+    91  O1    s     0.374924    0.870951    0.890494    0.000000
+    92  O1    s     0.131923    0.117867    0.893586    0.000000
+    93  O1    s     0.626044    0.895017    0.129164    0.000000
+    94  O1    s     0.879355    0.144925    0.126138    0.000000
+    95  O1    s     0.515042    0.979391    0.971840    0.000000
+    96  O1    s     0.987933    0.045056    0.964560    0.000000
+    97  O1    s     0.159585    0.480116    0.339975    0.000000
+    98  O3    s     0.339607    0.532163    0.337374    0.000000
+    99  O1    s     0.838129    0.482010    0.677573    0.000000
+   100  O2    s     0.656636    0.542125    0.707942    0.000000
+   101  O3    s     0.270799    0.248656    0.306115    0.000000
+   102  O1    s     0.236184    0.779216    0.293699    0.000000
+   103  O3    s     0.727617    0.259887    0.736475    0.000000
+   104  O3    s     0.752813    0.774887    0.720632    0.000000
+   105  O1    s     0.152598    0.250443    0.139489    0.000000
+   106  O1    s     0.355395    0.766368    0.138385    0.000000
+   107  O1    s     0.851067    0.272055    0.886121    0.000000
+   108  O3    s     0.649186    0.768777    0.881545    0.000000
+   109  O1    s     0.871676    0.691030    0.876954    0.000000
+   110  O3    s     0.621689    0.337537    0.882021    0.000000
+   111  O1    s     0.122190    0.678057    0.136828    0.000000
+   112  O2    s     0.364932    0.349661    0.146456    0.000000
+   113  O1    s     0.659679    0.550129    0.085009    0.000000
+   114  O1    s     0.841092    0.490294    0.085719    0.000000
+   115  O3    s     0.342501    0.520398    0.947965    0.000000
+   116  O1    s     0.155801    0.467138    0.937277    0.000000
+   117  O1    s     0.733403    0.249202    0.048898    0.000000
+   118  O1    s     0.767644    0.791241    0.045623    0.000000
+   119  O3    s     0.272577    0.242335    0.979984    0.000000
+   120  O1    s     0.234153    0.763466    0.978978    0.000000
+--------------------------------------------------------------------------------
+
+  Final Cartesian lattice vectors (Angstroms) :
+
+       17.818107    0.058878   -0.136459
+        0.025616    7.766586   -0.013032
+       -0.084491   -0.015760   10.483806
+
+
+  Final cell parameters and derivatives :
+
+--------------------------------------------------------------------------------
+       a           17.818727 Angstrom     dE/de1(xx)     0.000996 eV/strain
+       b            7.766639 Angstrom     dE/de2(yy)     0.000806 eV/strain
+       c           10.484158 Angstrom     dE/de3(zz)    -0.004090 eV/strain
+       alpha       90.183785 Degrees      dE/de4(yz)    -0.000098 eV/strain
+       beta        90.900812 Degrees      dE/de5(xz)    -0.000195 eV/strain
+       gamma       89.620973 Degrees      dE/de6(xy)     0.000224 eV/strain
+--------------------------------------------------------------------------------
+
+  Primitive cell volume =          1450.701614 Angs**3
+
+  Density of cell =      2.669997 g/cm**3
+
+  Non-primitive cell volume =          1450.701614 Angs**3
+
+
+  Final internal derivatives :
+
+--------------------------------------------------------------------------------
+   No.  Atomic          a             b             c           Radius
+        Label          (eV)          (eV)          (eV)        (eV/Angs)
+--------------------------------------------------------------------------------
+      1 Ge    c       0.000000      0.000000      0.000000      0.000000
+      2 Ge    c      -0.002635     -0.001011     -0.000602      0.000000
+      3 Ge    c       0.000947     -0.001465     -0.003265      0.000000
+      4 Ge    c      -0.000841      0.000134     -0.004600      0.000000
+      5 Ge    c       0.007188      0.000953     -0.004234      0.000000
+      6 Ge    c      -0.007747      0.000279     -0.003923      0.000000
+      7 Ge    c      -0.004351      0.001200     -0.004934      0.000000
+      8 Ge    c       0.004232     -0.000963     -0.004889      0.000000
+      9 Ge    c      -0.002501     -0.000709      0.000557      0.000000
+     10 Ge    c       0.005866      0.001399      0.003480      0.000000
+     11 Ge    c       0.000349     -0.001129      0.000668      0.000000
+     12 Ge    c       0.001343      0.000855      0.002729      0.000000
+     13 Ge    c      -0.001514      0.000726     -0.001264      0.000000
+     14 Ge    c      -0.001183     -0.001637      0.000862      0.000000
+     15 Ge    c      -0.000231      0.002327      0.000744      0.000000
+     16 Ge    c      -0.002602      0.001067      0.000575      0.000000
+     17 Ge    c       0.002563      0.000441     -0.000906      0.000000
+     18 Ge    c      -0.000129     -0.000896     -0.000504      0.000000
+     19 Ge    c      -0.002230      0.002875      0.002677      0.000000
+     20 Ge    c       0.001740     -0.002905      0.002723      0.000000
+     21 Si    c       0.000457      0.000107     -0.000645      0.000000
+     22 Si    c      -0.001346     -0.000043      0.000691      0.000000
+     23 Si    c       0.002331      0.000241      0.000816      0.000000
+     24 Si    c      -0.001641      0.000320     -0.000170      0.000000
+     25 O1    c      -0.002143      0.000797     -0.000704      0.000000
+     26 O1    c       0.003505     -0.003739     -0.001359      0.000000
+     27 O1    c      -0.007905     -0.000465     -0.000436      0.000000
+     28 O3    c      -0.001278      0.000332     -0.004412      0.000000
+     29 O1    c       0.005082      0.002058     -0.003629      0.000000
+     30 O3    c      -0.000627     -0.000584     -0.004743      0.000000
+     31 O1    c      -0.000147      0.000808      0.000898      0.000000
+     32 O3    c       0.000634      0.001994      0.001351      0.000000
+     33 O1    c      -0.007312     -0.001368      0.001441      0.000000
+     34 O1    c       0.005515      0.000405      0.003599      0.000000
+     35 O1    c       0.024134     -0.000562      0.004977      0.000000
+     36 O1    c      -0.017989      0.001048      0.006172      0.000000
+     37 O1    c       0.013190     -0.001023     -0.000724      0.000000
+     38 O1    c      -0.012190      0.001117     -0.001689      0.000000
+     39 O1    c       0.007230      0.000626      0.001565      0.000000
+     40 O1    c      -0.004617     -0.000488     -0.000340      0.000000
+     41 O3    c      -0.000746     -0.002430     -0.004481      0.000000
+     42 O1    c       0.008258     -0.000093     -0.000915      0.000000
+     43 O1    c       0.000517      0.001050     -0.000443      0.000000
+     44 O1    c       0.005646      0.000456      0.000612      0.000000
+     45 O1    c       0.006332     -0.003543     -0.000342      0.000000
+     46 O1    c       0.004339      0.001769     -0.002988      0.000000
+     47 O1    c       0.012427      0.001943      0.001888      0.000000
+     48 O1    c      -0.013871     -0.000276      0.003808      0.000000
+     49 O1    c      -0.004506     -0.001490      0.000860      0.000000
+     50 O3    c       0.005474      0.000267      0.003573      0.000000
+     51 O1    c       0.004102     -0.000482      0.000270      0.000000
+     52 O2    c      -0.002509     -0.000144     -0.001769      0.000000
+     53 O3    c       0.000100     -0.001340      0.000699      0.000000
+     54 O1    c      -0.004995      0.004000     -0.002131      0.000000
+     55 O3    c      -0.000324     -0.001585     -0.001728      0.000000
+     56 O3    c      -0.001636      0.001056     -0.000722      0.000000
+     57 O1    c       0.004168     -0.001303     -0.001058      0.000000
+     58 O1    c       0.008221      0.002132     -0.001966      0.000000
+     59 O1    c       0.001126     -0.002335     -0.002650      0.000000
+     60 O3    c       0.001517      0.001018      0.000061      0.000000
+     61 O1    c       0.000541      0.001923     -0.002817      0.000000
+     62 O3    c       0.002557     -0.000842     -0.000244      0.000000
+     63 O1    c       0.003025      0.001189     -0.001604      0.000000
+     64 O2    c      -0.003548     -0.000859      0.000511      0.000000
+     65 O1    c      -0.001775     -0.001191      0.006074      0.000000
+     66 O1    c       0.004099      0.000970      0.004163      0.000000
+     67 O3    c       0.000576     -0.000736     -0.002906      0.000000
+     68 O1    c      -0.003763     -0.000525      0.000602      0.000000
+     69 O1    c       0.003714     -0.002580      0.001844      0.000000
+     70 O1    c       0.009912      0.002578      0.000251      0.000000
+     71 O3    c      -0.004983     -0.000921     -0.002460      0.000000
+     72 O1    c      -0.004630      0.002848      0.000939      0.000000
+     73 O1    s       0.004965      0.000802      0.000037      0.000000
+     74 O1    s      -0.008528      0.002131     -0.000503      0.000000
+     75 O1    s       0.006837      0.001854      0.000881      0.000000
+     76 O3    s       0.001177     -0.000017      0.005680      0.000000
+     77 O1    s      -0.004559     -0.001785      0.003047      0.000000
+     78 O3    s       0.000036      0.000140      0.005216      0.000000
+     79 O1    s       0.001321     -0.001434     -0.001121      0.000000
+     80 O3    s      -0.003059     -0.001845     -0.001709      0.000000
+     81 O1    s       0.003043      0.001142     -0.001421      0.000000
+     82 O1    s      -0.000344     -0.000231     -0.003774      0.000000
+     83 O1    s      -0.019195     -0.001608     -0.001855      0.000000
+     84 O1    s       0.011715      0.001072     -0.005149      0.000000
+     85 O1    s      -0.009755      0.001036      0.002168      0.000000
+     86 O1    s       0.010639     -0.001398      0.003688      0.000000
+     87 O1    s      -0.007667     -0.000478     -0.001118      0.000000
+     88 O1    s       0.004615      0.000194      0.001065      0.000000
+     89 O3    s       0.003574      0.001888      0.006209      0.000000
+     90 O1    s      -0.010041     -0.000122      0.002661      0.000000
+     91 O1    s      -0.000888     -0.002142      0.002036      0.000000
+     92 O1    s      -0.005087      0.001026      0.001493      0.000000
+     93 O1    s      -0.003980      0.000302      0.000317      0.000000
+     94 O1    s      -0.006122     -0.000041      0.003286      0.000000
+     95 O1    s      -0.008271     -0.000647     -0.000715      0.000000
+     96 O1    s       0.008990     -0.000743     -0.003050      0.000000
+     97 O1    s       0.005926      0.001183     -0.000266      0.000000
+     98 O3    s      -0.007575      0.000185     -0.004295      0.000000
+     99 O1    s      -0.005101      0.000483     -0.001419      0.000000
+    100 O2    s       0.003419      0.000086      0.001936      0.000000
+    101 O3    s      -0.001493      0.001063     -0.000824      0.000000
+    102 O1    s       0.004962     -0.004418      0.002590      0.000000
+    103 O3    s       0.001696      0.002027      0.001866      0.000000
+    104 O3    s       0.000940     -0.001436      0.000455      0.000000
+    105 O1    s      -0.003532      0.002007      0.001434      0.000000
+    106 O1    s      -0.010200     -0.002314      0.001691      0.000000
+    107 O1    s      -0.002087      0.003111      0.002479      0.000000
+    108 O3    s      -0.001942     -0.001678      0.000484      0.000000
+    109 O1    s      -0.001498     -0.002647      0.002158      0.000000
+    110 O3    s      -0.001865      0.001523      0.000656      0.000000
+    111 O1    s      -0.002759     -0.001630      0.001766      0.000000
+    112 O2    s       0.005346      0.000588     -0.000423      0.000000
+    113 O1    s       0.001709      0.000773     -0.006549      0.000000
+    114 O1    s      -0.004603     -0.000886     -0.004450      0.000000
+    115 O3    s      -0.000633      0.000802      0.003564      0.000000
+    116 O1    s       0.004929      0.000530     -0.001403      0.000000
+    117 O1    s      -0.002024      0.002433     -0.002317      0.000000
+    118 O1    s      -0.008720     -0.002848     -0.000259      0.000000
+    119 O3    s       0.002761      0.000245      0.002808      0.000000
+    120 O1    s       0.006152     -0.002801     -0.001478      0.000000
+--------------------------------------------------------------------------------
+  Maximum abs         0.024134      0.004418      0.006549      0.000000
+--------------------------------------------------------------------------------
+
+
+  Born effective charge tensors : 
+
+-------------------------------------------------------------------------------
+  Atom             x           y             z
+-------------------------------------------------------------------------------
+    1 Ge    x       4.2580     -0.1779      0.0021
+            y       0.1598      3.8686      0.0041
+            z      -0.8519      0.0350      4.2291
+-------------------------------------------------------------------------------
+    2 Ge    x       4.1579     -0.1586      0.0601
+            y       0.1954      3.8725     -0.0623
+            z       0.8641     -0.0323      4.3646
+-------------------------------------------------------------------------------
+    3 Ge    x       4.3693      0.2143     -0.4420
+            y      -0.1670      3.8606     -0.0037
+            z      -0.3045     -0.1426      4.4351
+-------------------------------------------------------------------------------
+    4 Ge    x       4.1408      0.0889      0.3937
+            y      -0.1120      3.9154      0.0037
+            z       0.2124      0.0878      4.5145
+-------------------------------------------------------------------------------
+    5 Ge    x       4.3206      0.2477     -0.0824
+            y      -0.1831      3.8982     -0.0344
+            z      -0.7326     -0.0682      3.6907
+-------------------------------------------------------------------------------
+    6 Ge    x       4.3591      0.1989      0.0479
+            y      -0.1888      3.8760      0.0660
+            z       0.6610      0.0626      3.7029
+-------------------------------------------------------------------------------
+    7 Ge    x       4.2398     -0.0845     -0.4425
+            y       0.2913      3.8909      0.1104
+            z      -0.3714      0.0178      3.9633
+-------------------------------------------------------------------------------
+    8 Ge    x       4.3481     -0.2388      0.3762
+            y       0.2171      3.8626     -0.0138
+            z       0.3837     -0.0868      3.9795
+-------------------------------------------------------------------------------
+    9 Ge    x       3.9461      0.2677     -0.3294
+            y       0.3483      4.1423     -0.0783
+            z      -0.1041     -0.0904      3.5745
+-------------------------------------------------------------------------------
+   10 Ge    x       3.9603      0.2521      0.2813
+            y       0.3334      4.1938      0.1526
+            z       0.0114      0.1923      3.5336
+-------------------------------------------------------------------------------
+   11 Ge    x       3.8926     -0.2913     -0.3008
+            y      -0.3440      4.2074      0.0462
+            z      -0.0717      0.1633      3.5942
+-------------------------------------------------------------------------------
+   12 Ge    x       3.9876      0.1311     -0.2190
+            y       0.4851      4.0992     -0.0775
+            z      -0.1228     -0.1313      3.5831
+-------------------------------------------------------------------------------
+   13 Ge    x       3.9568     -0.1157     -0.2137
+            y      -0.4390      4.1772      0.0805
+            z      -0.0831      0.1504      3.5788
+-------------------------------------------------------------------------------
+   14 Ge    x       3.9971      0.1181     -0.3249
+            y       0.4507      4.1750     -0.0965
+            z      -0.1448     -0.1360      3.3910
+-------------------------------------------------------------------------------
+   15 Ge    x       4.0707      0.1174      0.2834
+            y       0.4603      4.1355      0.0323
+            z       0.1596      0.1099      3.4560
+-------------------------------------------------------------------------------
+   16 Ge    x       4.0700     -0.1171      0.2811
+            y      -0.4490      4.1694     -0.0913
+            z       0.1475     -0.1446      3.4879
+-------------------------------------------------------------------------------
+   17 Ge    x       3.9864      0.2260     -0.3275
+            y       0.2538      4.2066     -0.1846
+            z      -0.0345     -0.2232      3.4949
+-------------------------------------------------------------------------------
+   18 Ge    x       3.9350      0.2472      0.3461
+            y       0.2318      4.1914      0.1008
+            z       0.0896      0.1687      3.5470
+-------------------------------------------------------------------------------
+   19 Ge    x       4.0362     -0.2042     -0.3821
+            y      -0.2248      4.1889      0.1625
+            z      -0.0848      0.1686      3.4327
+-------------------------------------------------------------------------------
+   20 Ge    x       4.0997     -0.2128      0.3582
+            y      -0.2694      4.1748     -0.1117
+            z       0.0765     -0.1548      3.4452
+-------------------------------------------------------------------------------
+   21 Si    x       3.6965     -0.2565      0.1632
+            y      -0.3873      3.7085     -0.2007
+            z       0.0180     -0.2250      3.2837
+-------------------------------------------------------------------------------
+   22 Si    x       3.6221      0.0815      0.1803
+            y       0.3964      3.6501      0.2444
+            z       0.0241      0.2592      3.2621
+-------------------------------------------------------------------------------
+   23 Si    x       3.5828     -0.0539      0.2477
+            y      -0.4055      3.8746     -0.0853
+            z       0.1795     -0.1883      3.0605
+-------------------------------------------------------------------------------
+   24 Si    x       3.7154     -0.0924     -0.2823
+            y      -0.4112      3.8772      0.0339
+            z      -0.2291      0.1867      2.9673
+-------------------------------------------------------------------------------
+   25 O1    x      -2.2796     -0.9016      0.3463
+            y      -1.0009     -2.2276      0.3626
+            z       0.4098      0.3491     -1.6354
+-------------------------------------------------------------------------------
+   26 O1    x      -2.1341     -0.8928     -0.3360
+            y      -1.0034     -2.3745     -0.3715
+            z      -0.4022     -0.3690     -1.6431
+-------------------------------------------------------------------------------
+   27 O1    x      -2.2499      0.9112      0.5769
+            y       1.0114     -2.3462     -0.5633
+            z       0.5408     -0.5379     -1.6655
+-------------------------------------------------------------------------------
+   28 O3    x      -2.0263      0.9128     -0.5313
+            y       0.9713     -2.3196      0.5308
+            z      -0.5378      0.5583     -1.5874
+-------------------------------------------------------------------------------
+   29 O1    x      -2.0671     -0.8617      0.5327
+            y      -0.8551     -2.4518      0.4857
+            z       0.5107      0.4883     -1.6603
+-------------------------------------------------------------------------------
+   30 O3    x      -1.8922     -0.8526     -0.5424
+            y      -0.8068     -2.3344     -0.5237
+            z      -0.4905     -0.5484     -1.6063
+-------------------------------------------------------------------------------
+   31 O1    x      -1.9754      0.8486      0.3967
+            y       0.8199     -2.4694     -0.3578
+            z       0.4661     -0.3742     -1.6229
+-------------------------------------------------------------------------------
+   32 O3    x      -1.9577      0.8585     -0.4435
+            y       0.8089     -2.2395      0.3903
+            z      -0.5109      0.4465     -1.5457
+-------------------------------------------------------------------------------
+   33 O1    x      -2.1688      0.0143      0.9996
+            y       0.0378     -1.2603      0.0225
+            z       1.2564      0.0496     -3.0710
+-------------------------------------------------------------------------------
+   34 O1    x      -2.1064      0.0271     -1.0885
+            y       0.0391     -1.2839      0.0234
+            z      -1.3037     -0.0155     -3.3058
+-------------------------------------------------------------------------------
+   35 O1    x      -2.1142     -0.0509     -0.8982
+            y      -0.0454     -1.3292      0.0142
+            z      -0.8366      0.0170     -2.6738
+-------------------------------------------------------------------------------
+   36 O1    x      -2.1146     -0.0479      0.9284
+            y      -0.0408     -1.3436     -0.0028
+            z       0.9040      0.0057     -2.6753
+-------------------------------------------------------------------------------
+   37 O1    x      -2.1681     -0.0063     -0.8658
+            y      -0.0437     -1.2716      0.0156
+            z      -0.8973      0.0622     -2.7484
+-------------------------------------------------------------------------------
+   38 O1    x      -2.1985     -0.0347      0.9137
+            y      -0.0735     -1.2901      0.0482
+            z       0.8896      0.0387     -2.7379
+-------------------------------------------------------------------------------
+   39 O1    x      -2.0555     -0.8464      0.4300
+            y      -0.7910     -2.4614      0.3541
+            z       0.4773      0.3928     -1.5026
+-------------------------------------------------------------------------------
+   40 O1    x      -2.1167     -0.8610     -0.4118
+            y      -0.8007     -2.4490     -0.3245
+            z      -0.4514     -0.3499     -1.4482
+-------------------------------------------------------------------------------
+   41 O3    x      -2.0344      0.8652      0.5848
+            y       0.7596     -2.2613     -0.5775
+            z       0.5079     -0.5631     -1.4990
+-------------------------------------------------------------------------------
+   42 O1    x      -2.0168      0.7970     -0.5389
+            y       0.7306     -2.4964      0.5433
+            z      -0.4838      0.5158     -1.5755
+-------------------------------------------------------------------------------
+   43 O1    x      -2.1681     -0.9204      0.5436
+            y      -0.9683     -2.3883      0.5262
+            z       0.4808      0.5119     -1.6091
+-------------------------------------------------------------------------------
+   44 O1    x      -2.3223     -0.8987     -0.5968
+            y      -0.9417     -2.2567     -0.5612
+            z      -0.5138     -0.5138     -1.6114
+-------------------------------------------------------------------------------
+   45 O1    x      -2.2916      0.8813      0.3480
+            y       0.9624     -2.2137     -0.3745
+            z       0.3967     -0.3729     -1.5556
+-------------------------------------------------------------------------------
+   46 O1    x      -2.3341      0.9146     -0.3257
+            y       0.9829     -2.2232      0.3138
+            z      -0.3789      0.3350     -1.5021
+-------------------------------------------------------------------------------
+   47 O1    x      -2.1966      0.0828     -0.7298
+            y       0.1082     -1.4100     -0.0285
+            z      -0.4586     -0.0770     -2.1736
+-------------------------------------------------------------------------------
+   48 O1    x      -2.1561      0.0981      0.7770
+            y       0.0896     -1.3751     -0.0277
+            z       0.5330     -0.0062     -2.2766
+-------------------------------------------------------------------------------
+   49 O1    x      -1.3621      0.2230      0.0826
+            y       0.2738     -3.1945      0.0376
+            z       0.0485      0.0247     -1.3444
+-------------------------------------------------------------------------------
+   50 O3    x      -1.2310      0.1357     -0.0492
+            y       0.1999     -3.0700     -0.0986
+            z      -0.0103     -0.1328     -1.2972
+-------------------------------------------------------------------------------
+   51 O1    x      -1.3600     -0.1495      0.1054
+            y      -0.2065     -3.1730      0.0523
+            z       0.0655      0.0270     -1.3678
+-------------------------------------------------------------------------------
+   52 O2    x      -1.1739     -0.1112     -0.0463
+            y      -0.1592     -2.5272      0.0134
+            z      -0.0188      0.0192     -1.1293
+-------------------------------------------------------------------------------
+   53 O3    x      -2.7977     -0.3431      0.0517
+            y      -0.2672     -1.5173      0.0473
+            z       0.0450      0.0771     -1.1662
+-------------------------------------------------------------------------------
+   54 O1    x      -3.0403     -0.2190      0.0078
+            y      -0.1083     -1.6122     -0.0126
+            z       0.0505     -0.0409     -1.1982
+-------------------------------------------------------------------------------
+   55 O3    x      -2.8522      0.3206      0.0635
+            y       0.2672     -1.5288     -0.0260
+            z       0.0525     -0.0550     -1.1347
+-------------------------------------------------------------------------------
+   56 O3    x      -2.9287      0.1069      0.1249
+            y       0.0093     -1.4670      0.0297
+            z       0.1331      0.0519     -1.1479
+-------------------------------------------------------------------------------
+   57 O1    x      -1.4872     -0.1072      0.0144
+            y      -0.1256     -1.4209     -0.0102
+            z       0.0163     -0.0294     -2.7484
+-------------------------------------------------------------------------------
+   58 O1    x      -1.4310     -0.1228      0.0161
+            y      -0.1458     -1.4969     -0.0467
+            z       0.0184     -0.0355     -2.6782
+-------------------------------------------------------------------------------
+   59 O1    x      -1.4920      0.0940     -0.1118
+            y       0.1179     -1.4267      0.0172
+            z      -0.0572      0.0146     -2.7104
+-------------------------------------------------------------------------------
+   60 O3    x      -1.3316      0.1008      0.0699
+            y       0.1205     -1.3931     -0.1209
+            z       0.0478     -0.0957     -2.6004
+-------------------------------------------------------------------------------
+   61 O1    x      -1.5044     -0.0592     -0.1402
+            y      -0.1278     -1.4023     -0.0253
+            z      -0.1183     -0.0077     -2.7536
+-------------------------------------------------------------------------------
+   62 O3    x      -1.3850     -0.0774      0.1686
+            y      -0.1414     -1.3557      0.0558
+            z       0.1343      0.0171     -2.5580
+-------------------------------------------------------------------------------
+   63 O1    x      -1.4974      0.0632     -0.0430
+            y       0.1287     -1.4093     -0.0198
+            z      -0.0438     -0.0364     -2.7295
+-------------------------------------------------------------------------------
+   64 O2    x      -1.2269      0.0383      0.0468
+            y       0.1021     -1.2598     -0.0229
+            z       0.0460     -0.0188     -2.1021
+-------------------------------------------------------------------------------
+   65 O1    x      -1.3598     -0.1958      0.0859
+            y      -0.3112     -3.2166     -0.0119
+            z       0.0380      0.0084     -1.3392
+-------------------------------------------------------------------------------
+   66 O1    x      -1.3865     -0.2006     -0.0878
+            y      -0.2960     -3.1787      0.0619
+            z      -0.0481      0.0268     -1.3210
+-------------------------------------------------------------------------------
+   67 O3    x      -1.2716      0.1450      0.0682
+            y       0.2340     -3.0582      0.1862
+            z       0.0236      0.1820     -1.2741
+-------------------------------------------------------------------------------
+   68 O1    x      -1.4089      0.2441     -0.1119
+            y       0.3219     -3.1931      0.0076
+            z      -0.0715      0.0183     -1.3127
+-------------------------------------------------------------------------------
+   69 O1    x      -3.0562      0.2229     -0.0010
+            y       0.1701     -1.5752      0.0373
+            z      -0.0082      0.0578     -1.1980
+-------------------------------------------------------------------------------
+   70 O1    x      -3.0576      0.2271      0.0301
+            y       0.1615     -1.5805     -0.0386
+            z      -0.0314     -0.0559     -1.1950
+-------------------------------------------------------------------------------
+   71 O3    x      -2.8538     -0.3374     -0.0730
+            y      -0.2847     -1.5058     -0.0588
+            z      -0.0704     -0.0891     -1.1487
+-------------------------------------------------------------------------------
+   72 O1    x      -3.1080     -0.2222     -0.0151
+            y      -0.1257     -1.5772      0.0311
+            z      -0.0414      0.0503     -1.1848
+-------------------------------------------------------------------------------
+
+
+
+
+  Elastic Constant Matrix: (Units=GPa)
+
+-------------------------------------------------------------------------------
+  Indices      1         2         3         4         5         6    
+-------------------------------------------------------------------------------
+       1     42.5571   19.4689   16.8970   -1.1583   -0.2856    0.4132
+       2     19.4689   32.9824   15.7028   -1.3616    1.1173    0.6067
+       3     16.8970   15.7028   13.8033   -0.4053   -0.7614    0.8893
+       4     -1.1583   -1.3616   -0.4053    7.3918    0.5295    0.4297
+       5     -0.2856    1.1173   -0.7614    0.5295   16.1645   -1.0591
+       6      0.4132    0.6067    0.8893    0.4297   -1.0591   17.7766
+-------------------------------------------------------------------------------
+
+
+  Elastic Compliance Matrix: (Units=1/GPa)
+
+-------------------------------------------------------------------------------
+  Indices      1         2         3         4         5         6    
+-------------------------------------------------------------------------------
+       1    0.045948 -0.000220 -0.056076  0.004128 -0.001849  0.001535
+       2   -0.000220  0.067816 -0.077147  0.008793 -0.008559  0.000828
+       3   -0.056076 -0.077147  0.229772 -0.011111  0.015110 -0.006390
+       4    0.004128  0.008793 -0.011111  0.137562 -0.005795 -0.003511
+       5   -0.001849 -0.008559  0.015110 -0.005795  0.063554  0.003506
+       6    0.001535  0.000828 -0.006390 -0.003511  0.003506  0.056803
+-------------------------------------------------------------------------------
+
+  Mechanical properties :
+
+-------------------------------------------------------------------------------
+  Convention :                    Reuss         Voigt         Hill
+-------------------------------------------------------------------------------
+  Bulk  Modulus (GPa)     =      13.04596      21.49778      17.27187
+  Shear Modulus (GPa)     =       5.59353      10.75153       8.17253
+-------------------------------------------------------------------------------
+  Velocity S-wave (km/s)  =       1.44740       2.00669       1.74954
+  Velocity P-wave (km/s)  =       2.77117       3.66342       3.24808
+-------------------------------------------------------------------------------
+  Compressibility (1/GPa) =    0.07665211
+-------------------------------------------------------------------------------
+  Stress axis :                     x             y             z
+-------------------------------------------------------------------------------
+  Youngs Moduli (GPa)     =      21.76376      14.74578       4.35213
+-------------------------------------------------------------------------------
+  Poissons Ratio (x)      =                     0.00324       0.24405
+  Poissons Ratio (y)      =       0.00479                     0.33575
+  Poissons Ratio (z)      =       1.22041       1.13759
+-------------------------------------------------------------------------------
+
+
+  Piezoelectric Strain Matrix: (Units=C/m**2)
+
+-------------------------------------------------------------------------------
+  Indices      1         2         3         4         5         6    
+-------------------------------------------------------------------------------
+       x     0.40172   0.42115  -0.05654   0.16210   0.56825   0.29030
+       y     0.05747  -0.28411  -0.08221   0.44129   0.87482  -0.07627
+       z     0.75735   0.55345  -1.01547   0.22746  -0.07272  -0.22902
+-------------------------------------------------------------------------------
+
+
+  Piezoelectric Stress Matrix: (Units=10**-11 C/N)
+
+-------------------------------------------------------------------------------
+  Indices      1         2         3         4         5         6    
+-------------------------------------------------------------------------------
+       x     2.16006   2.96364  -6.30794   2.39762   3.09915   1.92393
+       y     0.74007  -1.66076   0.86069   5.45552   5.38571  -0.24363
+       z     9.23416  11.81392 -32.06548   5.17903  -2.82228  -0.59532
+-------------------------------------------------------------------------------
+
+
+  Static dielectric constant tensor : 
+
+-------------------------------------------------------------------------------
+              x         y         z
+-------------------------------------------------------------------------------
+       x     5.39945   0.02035   0.00013
+       y     0.02035   5.98109  -0.02918
+       z     0.00013  -0.02918   4.25135
+--------------------------------------------------------------------------------
+
+  High frequency dielectric constant tensor : 
+
+-------------------------------------------------------------------------------
+              x         y         z
+-------------------------------------------------------------------------------
+       x     1.53750  -0.00089  -0.00056
+       y    -0.00089   1.53984  -0.00010
+       z    -0.00056  -0.00010   1.49381
+-------------------------------------------------------------------------------
+
+  Static refractive indices : 
+
+-------------------------------------------------------------------------------
+    1 =    2.06176      2 =    2.32352      3 =    2.44587
+-------------------------------------------------------------------------------
+
+  High frequency refractive indices : 
+
+-------------------------------------------------------------------------------
+    1 =    1.22221      2 =    1.23984      3 =    1.24102
+-------------------------------------------------------------------------------
+
+
+  Time to end of optimisation =      15.1351 seconds
+
+
+  Peak dynamic memory used =       5.01 MB 
+
+
+  Timing analysis for GULP :
+
+--------------------------------------------------------------------------------
+  Task / Subroutine                                          Time (Seconds)
+--------------------------------------------------------------------------------
+  Calculation of reciprocal space energy and derivatives          0.8763
+  Calculation of real space energy and derivatives                9.5103
+  Calculation of three-body energy and derivatives                0.1418
+  Calculation and manipulation of Hessian matrix                  4.8711
+  Calculation of matrix inversion                                 0.0417
+  Global summation overhead                                       0.0002
+--------------------------------------------------------------------------------
+  Total CPU time                                                 15.1351
+--------------------------------------------------------------------------------
+
+
+  Dump file written as c00189.vasp.grs
+  CIF file written as c00189.vasp.cif
+
+
+  Job Finished at 12:25.14 31st October    2025                               
+
