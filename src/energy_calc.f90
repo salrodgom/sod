@@ -23,10 +23,13 @@ MODULE energy_calc
     REAL(dp), PRIVATE :: E0              ! Reference energy
     REAL(dp), ALLOCATABLE, PRIVATE :: dE1(:)     ! One-body terms
     REAL(dp), ALLOCATABLE, PRIVATE :: dE2(:,:)   ! Two-body terms
-    ! Three-body terms stored sparsely as lists of ordered triples (i<j<k)
+    ! Three- and four-body terms stored sparsely as ordered tuples
     INTEGER, ALLOCATABLE, PRIVATE :: dE3_i(:), dE3_j(:), dE3_k(:)
     REAL(dp), ALLOCATABLE, PRIVATE :: dE3_val(:)
     INTEGER, PRIVATE :: n_dE3 = 0
+    INTEGER, ALLOCATABLE, PRIVATE :: dE4_i(:), dE4_j(:), dE4_k(:), dE4_l(:)
+    REAL(dp), ALLOCATABLE, PRIVATE :: dE4_val(:)
+    INTEGER, PRIVATE :: n_dE4 = 0
     ! Complementary expansion (starting from all-Ge reference)
     REAL(dp), PRIVATE :: E0_high = 0.0_dp
     LOGICAL, PRIVATE :: high_base_loaded = .false.
@@ -34,6 +37,9 @@ MODULE energy_calc
     INTEGER, ALLOCATABLE, PRIVATE :: hE3_i(:), hE3_j(:), hE3_k(:)
     REAL(dp), ALLOCATABLE, PRIVATE :: hE3_val(:)
     INTEGER, PRIVATE :: n_h_dE3 = 0
+    INTEGER, ALLOCATABLE, PRIVATE :: hE4_i(:), hE4_j(:), hE4_k(:), hE4_l(:)
+    REAL(dp), ALLOCATABLE, PRIVATE :: hE4_val(:)
+    INTEGER, PRIVATE :: n_h_dE4 = 0
     ! Book-keeping for expansion orders available
     INTEGER, PRIVATE :: max_low_order = 0
     INTEGER, PRIVATE :: max_high_order = 0
@@ -68,7 +74,7 @@ MODULE energy_calc
     SUBROUTINE init_energy_calc()
         IMPLICIT NONE
     INTEGER :: op, m, m1, m2, aux, i, j, k, io_stat
-    INTEGER :: Mm1, Mm2, Mm3
+    INTEGER :: Mm1, Mm2, Mm3, Mm4
     ! Variables for EQMATRIX generation
     INTEGER :: na, nb, nc, sptarget, t, at, pos, attmp, op1
     INTEGER, ALLOCATABLE :: fulleqmatrix(:,:)
@@ -78,10 +84,15 @@ MODULE energy_calc
     REAL(dp), ALLOCATABLE :: energies1(:), energies2(:)
     INTEGER, ALLOCATABLE :: conf1(:), conf2(:,:), omega1(:), omega2(:)
     INTEGER, ALLOCATABLE :: conf3(:,:), omega3(:)
-    REAL(dp), ALLOCATABLE :: energies3(:)
-    INTEGER :: idx, found, ii, jj, kk
+    INTEGER, ALLOCATABLE :: conf4(:,:), omega4(:)
+    REAL(dp), ALLOCATABLE :: energies3(:), energies4(:)
+    INTEGER :: idx, found, ii, jj, kk, p, q
     INTEGER, ALLOCATABLE :: tmpi(:), tmpj(:), tmpk(:)
     REAL(dp), ALLOCATABLE :: tmpv(:)
+    INTEGER, ALLOCATABLE :: tmp4_i(:), tmp4_j(:), tmp4_k(:), tmp4_l(:)
+    REAL(dp), ALLOCATABLE :: tmp4_v(:)
+    INTEGER :: arr4(4)
+    REAL(dp) :: triple_sum
     CHARACTER(len=80) :: line
     INTEGER :: cnt1, cnt2
     ! Variables for unit-cell generation and deduplication
@@ -96,12 +107,18 @@ MODULE energy_calc
     E0_high = 0.0_dp
     high_base_loaded = .false.
     n_h_dE3 = 0
+    n_h_dE4 = 0
     IF (ALLOCATED(hE1)) DEALLOCATE(hE1)
     IF (ALLOCATED(hE2)) DEALLOCATE(hE2)
     IF (ALLOCATED(hE3_i)) DEALLOCATE(hE3_i)
     IF (ALLOCATED(hE3_j)) DEALLOCATE(hE3_j)
     IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
     IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
+    IF (ALLOCATED(hE4_i)) DEALLOCATE(hE4_i)
+    IF (ALLOCATED(hE4_j)) DEALLOCATE(hE4_j)
+    IF (ALLOCATED(hE4_k)) DEALLOCATE(hE4_k)
+    IF (ALLOCATED(hE4_l)) DEALLOCATE(hE4_l)
+    IF (ALLOCATED(hE4_val)) DEALLOCATE(hE4_val)
 
     WRITE(*,*) 'init_energy_calc: start'
         ! Read SGO file first to get symmetry operations
@@ -749,6 +766,160 @@ MODULE energy_calc
         END IF
     END IF
 
+    ! --- Read four-body terms (n04) ------------------------------------
+    IF (ALLOCATED(dE4_i)) DEALLOCATE(dE4_i)
+    IF (ALLOCATED(dE4_j)) DEALLOCATE(dE4_j)
+    IF (ALLOCATED(dE4_k)) DEALLOCATE(dE4_k)
+    IF (ALLOCATED(dE4_l)) DEALLOCATE(dE4_l)
+    IF (ALLOCATED(dE4_val)) DEALLOCATE(dE4_val)
+    n_dE4 = 0
+
+    WRITE(*,*) 'init_energy_calc: reading n04/OUTSOD'
+    OPEN(UNIT=19, FILE='n04/OUTSOD', STATUS='OLD', IOSTAT=io_stat)
+    IF (io_stat /= 0) THEN
+        WRITE(*,*) 'Warning: n04/OUTSOD not found; skipping four-body terms'
+        Mm4 = 0
+    ELSE
+        Mm4 = 0
+        DO
+            READ(19,'(A)',IOSTAT=io_stat) line
+            IF (io_stat /= 0) EXIT
+            IF (INDEX(line,'configuration') /= 0) THEN
+                READ(line,*,IOSTAT=io_stat) Mm4
+                IF (io_stat == 0) EXIT
+            END IF
+        END DO
+        IF (Mm4 <= 0) THEN
+            WRITE(*,*) 'Warning: could not determine Mm4 from n04/OUTSOD; skipping four-body'
+            CLOSE(19)
+            Mm4 = 0
+        ELSE
+            WRITE(*,*) 'init_energy_calc: Mm4=', Mm4
+            ALLOCATE(conf4(Mm4,4), omega4(Mm4), energies4(Mm4))
+            REWIND(19)
+            m = 0
+            DO
+                READ(19,'(A)',IOSTAT=io_stat) line
+                IF (io_stat /= 0) EXIT
+                IF (TRIM(line) == '') CYCLE
+                IF (line(1:1) == '#') CYCLE
+                READ(line,*,IOSTAT=io_stat) aux, omega4(m+1), conf4(m+1,1), conf4(m+1,2), conf4(m+1,3), conf4(m+1,4)
+                IF (io_stat == 0) THEN
+                    m = m + 1
+                    IF (m == Mm4) EXIT
+                END IF
+            END DO
+            WRITE(*,*) 'init_energy_calc: finished reading OUTSOD4 mappings, read m=', m
+            CLOSE(19)
+
+            WRITE(*,*) 'init_energy_calc: reading n04/ENERGIES'
+            OPEN(UNIT=28, FILE='n04/ENERGIES', STATUS='OLD', IOSTAT=io_stat)
+            IF (io_stat /= 0) THEN
+                WRITE(*,*) 'Warning: cannot open n04/ENERGIES; skipping four-body terms'
+                DEALLOCATE(conf4, omega4, energies4)
+                Mm4 = 0
+            ELSE
+                DO m = 1, Mm4
+                    READ(28,*,IOSTAT=io_stat) energies4(m)
+                    IF (io_stat /= 0) EXIT
+                END DO
+                CLOSE(28)
+                IF (io_stat /= 0) THEN
+                    WRITE(*,*) 'Warning: incomplete n04/ENERGIES data; skipping four-body terms'
+                    DEALLOCATE(conf4, omega4, energies4)
+                    Mm4 = 0
+                ELSE
+                    n_dE4 = 0
+                    max_low_order = MAX(max_low_order, 4)
+                    DO m = 1, Mm4
+                        quad_operator: DO op = 1, nop
+                            arr4 = (/ eqmatrix(op, conf4(m,1)), eqmatrix(op, conf4(m,2)), &
+                                      eqmatrix(op, conf4(m,3)), eqmatrix(op, conf4(m,4)) /)
+                            DO p = 1, 3
+                                DO q = p+1, 4
+                                    IF (arr4(p) == arr4(q)) CYCLE quad_operator
+                                END DO
+                            END DO
+
+                            aux = COUNT(eqmatrix(:, conf4(m,1)) == eqmatrix(op, conf4(m,1)) .AND. &
+                                        eqmatrix(:, conf4(m,2)) == eqmatrix(op, conf4(m,2)) .AND. &
+                                        eqmatrix(:, conf4(m,3)) == eqmatrix(op, conf4(m,3)) .AND. &
+                                        eqmatrix(:, conf4(m,4)) == eqmatrix(op, conf4(m,4)))
+                            IF (aux == 0) CYCLE
+
+                            CALL sort_int_small(arr4, 4)
+
+                            prod = energies4(m) - E0
+                            DO idx = 1, 4
+                                prod = prod - dE1(arr4(idx))
+                            END DO
+                            DO p = 1, 3
+                                DO q = p+1, 4
+                                    prod = prod - dE2(arr4(p), arr4(q))
+                                END DO
+                            END DO
+
+                            triple_sum = 0.0_dp
+                            IF (n_dE3 > 0 .AND. ALLOCATED(dE3_i)) THEN
+                                triple_sum = triple_sum + get_low_triplet(arr4(1), arr4(2), arr4(3))
+                                triple_sum = triple_sum + get_low_triplet(arr4(1), arr4(2), arr4(4))
+                                triple_sum = triple_sum + get_low_triplet(arr4(1), arr4(3), arr4(4))
+                                triple_sum = triple_sum + get_low_triplet(arr4(2), arr4(3), arr4(4))
+                            END IF
+
+                            prod = (prod - triple_sum) / REAL(aux, dp)
+
+                            found = 0
+                            IF (n_dE4 > 0 .AND. ALLOCATED(dE4_i)) THEN
+                                DO idx = 1, n_dE4
+                                    IF (dE4_i(idx) == arr4(1) .AND. dE4_j(idx) == arr4(2) .AND. &
+                                        dE4_k(idx) == arr4(3) .AND. dE4_l(idx) == arr4(4)) THEN
+                                        dE4_val(idx) = dE4_val(idx) + prod
+                                        found = 1
+                                        EXIT
+                                    END IF
+                                END DO
+                            END IF
+                            IF (found == 0) THEN
+                                IF (.NOT. ALLOCATED(dE4_i)) THEN
+                                    ALLOCATE(dE4_i(1), dE4_j(1), dE4_k(1), dE4_l(1), dE4_val(1))
+                                    dE4_i(1) = arr4(1)
+                                    dE4_j(1) = arr4(2)
+                                    dE4_k(1) = arr4(3)
+                                    dE4_l(1) = arr4(4)
+                                    dE4_val(1) = prod
+                                    n_dE4 = 1
+                                ELSE
+                                    ALLOCATE(tmp4_i(n_dE4+1), tmp4_j(n_dE4+1), tmp4_k(n_dE4+1), tmp4_l(n_dE4+1))
+                                    ALLOCATE(tmp4_v(n_dE4+1))
+                                    tmp4_i(1:n_dE4) = dE4_i(1:n_dE4)
+                                    tmp4_j(1:n_dE4) = dE4_j(1:n_dE4)
+                                    tmp4_k(1:n_dE4) = dE4_k(1:n_dE4)
+                                    tmp4_l(1:n_dE4) = dE4_l(1:n_dE4)
+                                    tmp4_v(1:n_dE4) = dE4_val(1:n_dE4)
+                                    tmp4_i(n_dE4+1) = arr4(1)
+                                    tmp4_j(n_dE4+1) = arr4(2)
+                                    tmp4_k(n_dE4+1) = arr4(3)
+                                    tmp4_l(n_dE4+1) = arr4(4)
+                                    tmp4_v(n_dE4+1) = prod
+                                    DEALLOCATE(dE4_i, dE4_j, dE4_k, dE4_l, dE4_val)
+                                    ALLOCATE(dE4_i(n_dE4+1), dE4_j(n_dE4+1), dE4_k(n_dE4+1), dE4_l(n_dE4+1), dE4_val(n_dE4+1))
+                                    dE4_i = tmp4_i
+                                    dE4_j = tmp4_j
+                                    dE4_k = tmp4_k
+                                    dE4_l = tmp4_l
+                                    dE4_val = tmp4_v
+                                    DEALLOCATE(tmp4_i, tmp4_j, tmp4_k, tmp4_l, tmp4_v)
+                                    n_dE4 = n_dE4 + 1
+                                END IF
+                            END IF
+                        END DO quad_operator
+                    END DO
+                END IF
+            END IF
+        END IF
+    END IF
+
     ! Clean up temporary arrays
     IF (Mm3 == 0) THEN
         ! ensure dE3 is allocated to avoid unallocated references later; allocate zero-sized or skip
@@ -765,13 +936,14 @@ MODULE energy_calc
             IF (ABS(dE2(i,j)) > 1.0E-12_dp) cnt2 = cnt2 + 1
         END DO
     END DO
-    WRITE(*,'(A,I0,A,I0,A,I0,A,I0,A,I0)') 'init_energy_calc: summary: npos=', npos, &
+    WRITE(*,'(A,I0,A,I0,A,I0,A,I0,A,I0,A,I0)') 'init_energy_calc: summary: npos=', npos, &
         ', nop=', nop, ', nonzero dE1=', cnt1, ', nonzero dE2_pairs=', cnt2, &
-        ', dE3_triples=', n_dE3
+        ', dE3_triples=', n_dE3, ', dE4_quads=', n_dE4
     WRITE(*,'(A,I0)') 'init_energy_calc: low-side max order = ', max_low_order
     IF (high_base_loaded) THEN
-        WRITE(*,'(A,F12.6,A,I0)') 'init_energy_calc: high-side E0 = ', E0_high, &
-            ', max hole order = ', max_high_order
+        WRITE(*,'(A,F12.6,A,I0,A,I0,A,I0)') 'init_energy_calc: high-side E0 = ', E0_high, &
+            ', max hole order = ', max_high_order, ', hole triples=', n_h_dE3, &
+            ', hole quads=', n_h_dE4
     ELSE
         WRITE(*,'(A)') 'init_energy_calc: high-side cluster data not available'
     END IF
@@ -779,6 +951,9 @@ MODULE energy_calc
     IF (ALLOCATED(conf3)) DEALLOCATE(conf3)
     IF (ALLOCATED(omega3)) DEALLOCATE(omega3)
     IF (ALLOCATED(energies3)) DEALLOCATE(energies3)
+    IF (ALLOCATED(conf4)) DEALLOCATE(conf4)
+    IF (ALLOCATED(omega4)) DEALLOCATE(omega4)
+    IF (ALLOCATED(energies4)) DEALLOCATE(energies4)
         
     END SUBROUTINE init_energy_calc
 
@@ -807,16 +982,22 @@ MODULE energy_calc
         END IF
         high_base_loaded = .true.
 
-        IF (ALLOCATED(hE1)) DEALLOCATE(hE1)
-        IF (ALLOCATED(hE2)) DEALLOCATE(hE2)
-        IF (ALLOCATED(hE3_i)) DEALLOCATE(hE3_i)
-        IF (ALLOCATED(hE3_j)) DEALLOCATE(hE3_j)
-        IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
-        IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
-        n_h_dE3 = 0
+    IF (ALLOCATED(hE1)) DEALLOCATE(hE1)
+    IF (ALLOCATED(hE2)) DEALLOCATE(hE2)
+    IF (ALLOCATED(hE3_i)) DEALLOCATE(hE3_i)
+    IF (ALLOCATED(hE3_j)) DEALLOCATE(hE3_j)
+    IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
+    IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
+    IF (ALLOCATED(hE4_i)) DEALLOCATE(hE4_i)
+    IF (ALLOCATED(hE4_j)) DEALLOCATE(hE4_j)
+    IF (ALLOCATED(hE4_k)) DEALLOCATE(hE4_k)
+    IF (ALLOCATED(hE4_l)) DEALLOCATE(hE4_l)
+    IF (ALLOCATED(hE4_val)) DEALLOCATE(hE4_val)
+    n_h_dE3 = 0
+    n_h_dE4 = 0
         max_high_order = 0
 
-        DO hole_count = 1, MIN(3, npos)
+    DO hole_count = 1, MIN(4, npos)
             ge_count = npos - hole_count
             IF (ge_count < 0) EXIT
             IF (.NOT. find_cluster_dir(ge_count, dirname)) CYCLE
@@ -835,13 +1016,17 @@ MODULE energy_calc
         REAL(dp), ALLOCATABLE :: energies(:)
         INTEGER, ALLOCATABLE :: ge_positions(:)
         LOGICAL, ALLOCATABLE :: is_ge(:)
-    INTEGER, ALLOCATABLE :: tmpi(:), tmpj(:), tmpk(:)
-    REAL(dp), ALLOCATABLE :: tmpv(:)
-        INTEGER :: j, hole_idx
+        INTEGER, ALLOCATABLE :: tmpi(:), tmpj(:), tmpk(:)
+        REAL(dp), ALLOCATABLE :: tmpv(:)
+        INTEGER, ALLOCATABLE :: tmp4_i(:), tmp4_j(:), tmp4_k(:), tmp4_l(:)
+        REAL(dp), ALLOCATABLE :: tmp4_v(:)
+        INTEGER :: j, hole_idx, p, q
         INTEGER :: denom, op
         INTEGER :: mapped_i, mapped_j, mapped_k
         INTEGER :: ii, jj, kk, idx, found_idx
         REAL(dp) :: contrib
+        INTEGER :: arr4(4)
+        REAL(dp) :: triple_sum
         LOGICAL :: exists
 
         IF (hole_count <= 0) RETURN
@@ -1030,6 +1215,93 @@ MODULE energy_calc
                     END IF
                 END DO
             END DO
+        CASE (4)
+            IF (.NOT. ALLOCATED(hE1) .OR. .NOT. ALLOCATED(hE2)) THEN
+                DEALLOCATE(hole_conf, energies)
+                RETURN
+            END IF
+            IF (ALLOCATED(hE4_i)) THEN
+                DEALLOCATE(hE4_i, hE4_j, hE4_k, hE4_l, hE4_val)
+            END IF
+            n_h_dE4 = 0
+            DO m = 1, Mm
+                quad_op: DO op = 1, nop
+                    arr4 = (/ eqmatrix(op, hole_conf(m,1)), eqmatrix(op, hole_conf(m,2)), &
+                              eqmatrix(op, hole_conf(m,3)), eqmatrix(op, hole_conf(m,4)) /)
+                    DO j = 1, 3
+                        DO p = j+1, 4
+                            IF (arr4(j) == arr4(p)) CYCLE quad_op
+                        END DO
+                    END DO
+                    denom = COUNT(eqmatrix(:, hole_conf(m,1)) == eqmatrix(op, hole_conf(m,1)) .AND. &
+                                   eqmatrix(:, hole_conf(m,2)) == eqmatrix(op, hole_conf(m,2)) .AND. &
+                                   eqmatrix(:, hole_conf(m,3)) == eqmatrix(op, hole_conf(m,3)) .AND. &
+                                   eqmatrix(:, hole_conf(m,4)) == eqmatrix(op, hole_conf(m,4)))
+                    IF (denom <= 0) CYCLE
+                    CALL sort_int_small(arr4, 4)
+                    contrib = energies(m) - E0_high
+                    DO j = 1, 4
+                        contrib = contrib - hE1(arr4(j))
+                    END DO
+                    DO j = 1, 3
+                        DO p = j+1, 4
+                            contrib = contrib - hE2(arr4(j), arr4(p))
+                        END DO
+                    END DO
+                    triple_sum = 0.0_dp
+                    IF (n_h_dE3 > 0 .AND. ALLOCATED(hE3_i)) THEN
+                        triple_sum = triple_sum + get_high_triplet(arr4(1), arr4(2), arr4(3))
+                        triple_sum = triple_sum + get_high_triplet(arr4(1), arr4(2), arr4(4))
+                        triple_sum = triple_sum + get_high_triplet(arr4(1), arr4(3), arr4(4))
+                        triple_sum = triple_sum + get_high_triplet(arr4(2), arr4(3), arr4(4))
+                    END IF
+                    contrib = (contrib - triple_sum) / REAL(denom, dp)
+                    found_idx = 0
+                    IF (n_h_dE4 > 0 .AND. ALLOCATED(hE4_i)) THEN
+                        DO idx = 1, n_h_dE4
+                            IF (hE4_i(idx) == arr4(1) .AND. hE4_j(idx) == arr4(2) .AND. &
+                                hE4_k(idx) == arr4(3) .AND. hE4_l(idx) == arr4(4)) THEN
+                                hE4_val(idx) = hE4_val(idx) + contrib
+                                found_idx = 1
+                                EXIT
+                            END IF
+                        END DO
+                    END IF
+                    IF (found_idx == 0) THEN
+                        IF (.NOT. ALLOCATED(hE4_i)) THEN
+                            ALLOCATE(hE4_i(1), hE4_j(1), hE4_k(1), hE4_l(1), hE4_val(1))
+                            hE4_i(1) = arr4(1)
+                            hE4_j(1) = arr4(2)
+                            hE4_k(1) = arr4(3)
+                            hE4_l(1) = arr4(4)
+                            hE4_val(1) = contrib
+                            n_h_dE4 = 1
+                        ELSE
+                            ALLOCATE(tmp4_i(n_h_dE4+1), tmp4_j(n_h_dE4+1), tmp4_k(n_h_dE4+1), tmp4_l(n_h_dE4+1))
+                            ALLOCATE(tmp4_v(n_h_dE4+1))
+                            tmp4_i(1:n_h_dE4) = hE4_i(1:n_h_dE4)
+                            tmp4_j(1:n_h_dE4) = hE4_j(1:n_h_dE4)
+                            tmp4_k(1:n_h_dE4) = hE4_k(1:n_h_dE4)
+                            tmp4_l(1:n_h_dE4) = hE4_l(1:n_h_dE4)
+                            tmp4_v(1:n_h_dE4) = hE4_val(1:n_h_dE4)
+                            tmp4_i(n_h_dE4+1) = arr4(1)
+                            tmp4_j(n_h_dE4+1) = arr4(2)
+                            tmp4_k(n_h_dE4+1) = arr4(3)
+                            tmp4_l(n_h_dE4+1) = arr4(4)
+                            tmp4_v(n_h_dE4+1) = contrib
+                            DEALLOCATE(hE4_i, hE4_j, hE4_k, hE4_l, hE4_val)
+                            ALLOCATE(hE4_i(n_h_dE4+1), hE4_j(n_h_dE4+1), hE4_k(n_h_dE4+1), hE4_l(n_h_dE4+1), hE4_val(n_h_dE4+1))
+                            hE4_i = tmp4_i
+                            hE4_j = tmp4_j
+                            hE4_k = tmp4_k
+                            hE4_l = tmp4_l
+                            hE4_val = tmp4_v
+                            DEALLOCATE(tmp4_i, tmp4_j, tmp4_k, tmp4_l, tmp4_v)
+                            n_h_dE4 = n_h_dE4 + 1
+                        END IF
+                    END IF
+                END DO quad_op
+            END DO
         END SELECT
 
         WRITE(*,*) 'load_high_order_expansion: processed holes=', hole_count, ' from ', TRIM(dirname)
@@ -1078,6 +1350,68 @@ MODULE energy_calc
         END IF
     END FUNCTION find_cluster_dir
 
+        SUBROUTINE sort_int_small(arr, n)
+            IMPLICIT NONE
+            INTEGER, INTENT(INOUT) :: arr(:)
+            INTEGER, INTENT(IN) :: n
+            INTEGER :: i, j, tmp, limit
+
+            limit = MIN(n, SIZE(arr))
+            IF (limit <= 1) RETURN
+
+            DO i = 1, limit-1
+                DO j = i+1, limit
+                    IF (arr(j) < arr(i)) THEN
+                        tmp = arr(i)
+                        arr(i) = arr(j)
+                        arr(j) = tmp
+                    END IF
+                END DO
+            END DO
+        END SUBROUTINE sort_int_small
+
+        REAL(dp) FUNCTION get_low_triplet(i, j, k) RESULT(val)
+            IMPLICIT NONE
+            INTEGER, INTENT(IN) :: i, j, k
+            INTEGER :: ii, jj, kk, idx_local
+
+            val = 0.0_dp
+            IF (n_dE3 <= 0) RETURN
+            IF (.NOT. ALLOCATED(dE3_i)) RETURN
+
+            ii = MIN(i, MIN(j, k))
+            kk = MAX(i, MAX(j, k))
+            jj = i + j + k - ii - kk
+
+            DO idx_local = 1, n_dE3
+                IF (dE3_i(idx_local) == ii .AND. dE3_j(idx_local) == jj .AND. dE3_k(idx_local) == kk) THEN
+                    val = dE3_val(idx_local)
+                    RETURN
+                END IF
+            END DO
+        END FUNCTION get_low_triplet
+
+        REAL(dp) FUNCTION get_high_triplet(i, j, k) RESULT(val)
+            IMPLICIT NONE
+            INTEGER, INTENT(IN) :: i, j, k
+            INTEGER :: ii, jj, kk, idx_local
+
+            val = 0.0_dp
+            IF (n_h_dE3 <= 0) RETURN
+            IF (.NOT. ALLOCATED(hE3_i)) RETURN
+
+            ii = MIN(i, MIN(j, k))
+            kk = MAX(i, MAX(j, k))
+            jj = i + j + k - ii - kk
+
+            DO idx_local = 1, n_h_dE3
+                IF (hE3_i(idx_local) == ii .AND. hE3_j(idx_local) == jj .AND. hE3_k(idx_local) == kk) THEN
+                    val = hE3_val(idx_local)
+                    RETURN
+                END IF
+            END DO
+        END FUNCTION get_high_triplet
+
     SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, energy_high_side)
         IMPLICIT NONE
         INTEGER, INTENT(IN) :: n_sites
@@ -1085,13 +1419,15 @@ MODULE energy_calc
         REAL(dp), INTENT(OUT) :: energy
         REAL(dp), INTENT(OUT), OPTIONAL :: energy_low_side
         REAL(dp), INTENT(OUT), OPTIONAL :: energy_high_side
-        INTEGER :: i, j, k, op
-        INTEGER :: mapped_i, mapped_j, mapped_k
-        INTEGER :: ii, jj, kk, idx
-        REAL(dp) :: min_energy_low, min_energy_high, energy_tmp, energy_high_tmp
-        REAL(dp) :: huge_val
+    INTEGER :: i, j, k, l, op
+    INTEGER :: mapped_i, mapped_j, mapped_k, mapped_l
+    INTEGER :: ii, jj, kk, idx
+    INTEGER :: arr4(4)
+    REAL(dp) :: min_energy_low, min_energy_high, energy_tmp, energy_high_tmp
+    REAL(dp) :: huge_val
         INTEGER :: nge, nsi
         LOGICAL :: can_use_high
+    REAL(dp) :: x_ge, w_low, w_high, mix_beta
         
         huge_val = HUGE(1.0_dp)
         min_energy_low = huge_val
@@ -1165,6 +1501,32 @@ MODULE energy_calc
                 END DO
             END IF
 
+            IF (ALLOCATED(dE4_i) .AND. n_dE4 > 0) THEN
+                DO i = 1, n_sites
+                    DO j = i+1, n_sites
+                        DO k = j+1, n_sites
+                            DO l = k+1, n_sites
+                                IF (config(i) == 2 .AND. config(j) == 2 .AND. config(k) == 2 .AND. config(l) == 2) THEN
+                                    mapped_i = eqmatrix(op, subpos(i))
+                                    mapped_j = eqmatrix(op, subpos(j))
+                                    mapped_k = eqmatrix(op, subpos(k))
+                                    mapped_l = eqmatrix(op, subpos(l))
+                                    arr4 = (/ mapped_i, mapped_j, mapped_k, mapped_l /)
+                                    CALL sort_int_small(arr4, 4)
+                                    DO idx = 1, n_dE4
+                                        IF (dE4_i(idx) == arr4(1) .AND. dE4_j(idx) == arr4(2) .AND. &
+                                            dE4_k(idx) == arr4(3) .AND. dE4_l(idx) == arr4(4)) THEN
+                                            energy_tmp = energy_tmp + dE4_val(idx)
+                                            EXIT
+                                        END IF
+                                    END DO
+                                END IF
+                            END DO
+                        END DO
+                    END DO
+                END DO
+            END IF
+
             min_energy_low = MIN(min_energy_low, energy_tmp)
 
             IF (can_use_high) THEN
@@ -1215,6 +1577,33 @@ MODULE energy_calc
                         END DO
                     END DO
                 END IF
+                IF (nsi > 3 .AND. ALLOCATED(hE4_i) .AND. n_h_dE4 > 0) THEN
+                    DO i = 1, n_sites
+                        IF (config(i) /= 1) CYCLE
+                        DO j = i+1, n_sites
+                            IF (config(j) /= 1) CYCLE
+                            DO k = j+1, n_sites
+                                IF (config(k) /= 1) CYCLE
+                                DO l = k+1, n_sites
+                                    IF (config(l) /= 1) CYCLE
+                                    mapped_i = eqmatrix(op, subpos(i))
+                                    mapped_j = eqmatrix(op, subpos(j))
+                                    mapped_k = eqmatrix(op, subpos(k))
+                                    mapped_l = eqmatrix(op, subpos(l))
+                                    arr4 = (/ mapped_i, mapped_j, mapped_k, mapped_l /)
+                                    CALL sort_int_small(arr4, 4)
+                                    DO idx = 1, n_h_dE4
+                                        IF (hE4_i(idx) == arr4(1) .AND. hE4_j(idx) == arr4(2) .AND. &
+                                            hE4_k(idx) == arr4(3) .AND. hE4_l(idx) == arr4(4)) THEN
+                                            energy_high_tmp = energy_high_tmp + hE4_val(idx)
+                                            EXIT
+                                        END IF
+                                    END DO
+                                END DO
+                            END DO
+                        END DO
+                    END DO
+                END IF
                 min_energy_high = MIN(min_energy_high, energy_high_tmp)
             END IF
         END DO
@@ -1222,13 +1611,12 @@ MODULE energy_calc
         IF (.NOT. can_use_high .OR. min_energy_high >= huge_val) THEN
             energy = min_energy_low
         ELSE
-            IF (nsi < nge) THEN
-                energy = min_energy_high
-            ELSEIF (nsi > nge) THEN
-                energy = min_energy_low
-            ELSE
-                energy = 0.5_dp * (min_energy_low + min_energy_high)
-            END IF
+            ! Blend low/high predictions smoothly; bias Si-side when Ge fraction is small
+            x_ge = REAL(nge, dp) / REAL(n_sites, dp)
+            mix_beta = 8.0_dp
+            w_high = 0.5_dp * (1.0_dp + TANH(mix_beta * (x_ge - 0.5_dp)))
+            w_low = 1.0_dp - w_high
+            energy = w_low * min_energy_low + w_high * min_energy_high
         END IF
 
         IF (PRESENT(energy_low_side)) energy_low_side = min_energy_low
@@ -1251,6 +1639,12 @@ MODULE energy_calc
         IF (ALLOCATED(dE3_k)) DEALLOCATE(dE3_k)
         IF (ALLOCATED(dE3_val)) DEALLOCATE(dE3_val)
         n_dE3 = 0
+    IF (ALLOCATED(dE4_i)) DEALLOCATE(dE4_i)
+    IF (ALLOCATED(dE4_j)) DEALLOCATE(dE4_j)
+    IF (ALLOCATED(dE4_k)) DEALLOCATE(dE4_k)
+    IF (ALLOCATED(dE4_l)) DEALLOCATE(dE4_l)
+    IF (ALLOCATED(dE4_val)) DEALLOCATE(dE4_val)
+    n_dE4 = 0
         IF (ALLOCATED(eqmatrix)) DEALLOCATE(eqmatrix)
         IF (ALLOCATED(coords)) DEALLOCATE(coords)
         IF (ALLOCATED(coords0)) DEALLOCATE(coords0)
@@ -1269,6 +1663,12 @@ MODULE energy_calc
         IF (ALLOCATED(hE3_k)) DEALLOCATE(hE3_k)
         IF (ALLOCATED(hE3_val)) DEALLOCATE(hE3_val)
         n_h_dE3 = 0
+    IF (ALLOCATED(hE4_i)) DEALLOCATE(hE4_i)
+    IF (ALLOCATED(hE4_j)) DEALLOCATE(hE4_j)
+    IF (ALLOCATED(hE4_k)) DEALLOCATE(hE4_k)
+    IF (ALLOCATED(hE4_l)) DEALLOCATE(hE4_l)
+    IF (ALLOCATED(hE4_val)) DEALLOCATE(hE4_val)
+    n_h_dE4 = 0
         E0_high = 0.0_dp
         high_base_loaded = .false.
         max_low_order = 0
