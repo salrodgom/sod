@@ -23,6 +23,7 @@ module sod_boltzmann_utils
     implicit none
 contains
 
+    ! Returns n choose k using a running product in 64-bit integers.
     function binomial_int64(n, k) result(val)
         integer, intent(in) :: n, k
         integer(ip) :: val
@@ -42,6 +43,7 @@ contains
         end do
     end function binomial_int64
 
+    ! Advances a sorted combination array to the next lexicographic tuple.
     logical function next_combination(comb, n)
         integer, intent(inout) :: comb(:)
         integer, intent(in) :: n
@@ -69,6 +71,7 @@ contains
         next_combination = .true.
     end function next_combination
 
+    ! Draws a random sorted subset of size k from 1..n without replacement.
     subroutine random_subset(n, k, subset)
         integer, intent(in) :: n, k
         integer, intent(out) :: subset(:)
@@ -104,6 +107,7 @@ contains
         call sort_int_ascending(subset, k)
     end subroutine random_subset
 
+    ! Sorts the first length entries of an integer array via insertion sort.
     subroutine sort_int_ascending(arr, length)
         integer, intent(inout) :: arr(:)
         integer, intent(in) :: length
@@ -146,6 +150,7 @@ program sod_boltzmann_mc
     integer :: summary_unit, summary_txt_unit
     logical :: use_parallel
     logical :: omp_available
+    logical :: force_restart_accept
 
     integer, allocatable :: eqmatrix(:,:), config(:), local_config(:)
     integer :: nop, total_sites
@@ -158,6 +163,7 @@ program sod_boltzmann_mc
 
     call parse_arguments(temperature, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available)
     call configure_random_seed(seed_value)
+    call configure_restart_mode(force_restart_accept)
 
     call init_energy_calc()
     call get_eqmatrix(eqmatrix, nop, total_sites)
@@ -217,6 +223,7 @@ program sod_boltzmann_mc
 
 contains
 
+    ! Parses optional command-line arguments and populates runtime parameters.
     subroutine parse_arguments(temp, max_subs, samples_level, seed, sampler, use_parallel, omp_available)
         real(dp), intent(out) :: temp
         integer, intent(out) :: max_subs, samples_level, seed
@@ -313,6 +320,7 @@ contains
         end if
     end subroutine parse_arguments
 
+    ! Emits program usage information including optional OpenMP note.
     subroutine print_usage(omp_available)
         logical, intent(in) :: omp_available
 
@@ -347,6 +355,7 @@ contains
                      ' Metropolis y OpenMP.'
     end subroutine print_usage
 
+    ! Checks whether a token corresponds to any supported help flag.
     logical function is_help_argument(arg)
         character(len=*), intent(in) :: arg
         character(len=len(arg)) :: token
@@ -372,6 +381,7 @@ contains
         end if
     end function is_help_argument
 
+    ! Initializes the intrinsic random generator with a deterministic or clock seed.
     subroutine configure_random_seed(seed)
         integer, intent(in) :: seed
         integer :: n, i
@@ -396,6 +406,42 @@ contains
         deallocate(seed_array)
     end subroutine configure_random_seed
 
+    ! Reads the restart environment toggle and reports whether restart moves are forced.
+    subroutine configure_restart_mode(force_restart)
+        logical, intent(out) :: force_restart
+        character(len=32) :: env_value
+        integer :: status, len_env, i
+        character(len=32) :: token
+
+        force_restart = .true.
+        call get_environment_variable('SOD_FORCE_RESTART_ACCEPT', env_value, length=len_env, status=status)
+        if (status /= 0 .or. len_env <= 0) then
+            write(*,'(A)') 'Modo reinicio forzado: activo (por defecto)'
+            return
+        end if
+
+        token = adjustl(env_value(1:len_env))
+        do i = 1, len_trim(token)
+            if (token(i:i) >= 'A' .and. token(i:i) <= 'Z') then
+                token(i:i) = achar(iachar(token(i:i)) + 32)
+            end if
+        end do
+        token = token(1:len_trim(token))
+
+        select case (trim(token))
+        case ('0', 'no', 'false', 'off', 'disable', 'disabled')
+            force_restart = .false.
+            write(*,'(A)') 'Modo reinicio forzado: desactivado (SOD_FORCE_RESTART_ACCEPT='//trim(token)//')'
+        case ('1', 'yes', 'true', 'on', 'enable', 'enabled')
+            force_restart = .true.
+            write(*,'(A)') 'Modo reinicio forzado: activo (SOD_FORCE_RESTART_ACCEPT='//trim(token)//')'
+        case default
+            force_restart = .true.
+            write(*,'(A)') 'Modo reinicio forzado: activo (valor desconocido, se usa por defecto)'
+        end select
+    end subroutine configure_restart_mode
+
+    ! Opens the summary CSV and text files and writes their headers.
     subroutine init_summary_files(unit_csv, unit_txt)
         integer, intent(out) :: unit_csv, unit_txt
         integer :: ios
@@ -420,6 +466,7 @@ contains
             'Ratio_aceptacion'
     end subroutine init_summary_files
 
+    ! Closes the summary file units if they are valid.
     subroutine close_summary_files(unit_csv, unit_txt)
         integer, intent(in) :: unit_csv, unit_txt
 
@@ -427,6 +474,7 @@ contains
         if (unit_txt /= 0) close(unit_txt)
     end subroutine close_summary_files
 
+    ! Chooses exhaustive or stochastic evaluation for a substitution level and dispatches it.
     subroutine process_level(level, total_sites, config, temperature, samples_level, max_exact, sampler, &
                              use_parallel, summary_unit, summary_txt_unit)
         integer, intent(in) :: level, total_sites, samples_level, max_exact
@@ -467,6 +515,7 @@ contains
         end if
     end subroutine process_level
 
+    ! Enumerates every configuration for a level and accumulates energy statistics.
     subroutine exhaustive_level(level, total_sites, config, temperature, total_comb, ncomb_int, use_parallel, &
                                 summary_unit, summary_txt_unit)
         integer, intent(in) :: level, total_sites, ncomb_int
@@ -528,6 +577,7 @@ contains
         deallocate(energies, energies_low, energies_high)
     end subroutine exhaustive_level
 
+    ! Samples random configurations uniformly when exhaustive enumeration is infeasible.
     subroutine monte_carlo_level(level, total_sites, config, temperature, samples_level, total_comb, use_parallel, &
                                  summary_unit, summary_txt_unit)
         integer, intent(in) :: level, total_sites, samples_level
@@ -575,6 +625,7 @@ contains
             if (trace_unit /= 0) then
                 call write_mc_trace_step(trace_unit, valid_samples, valid_samples, energies(valid_samples), &
                                          energies_low(valid_samples), energies_high(valid_samples))
+                call flush(trace_unit)
             end if
         end do
 
@@ -587,6 +638,7 @@ contains
         deallocate(energies, energies_low, energies_high)
     end subroutine monte_carlo_level
 
+    ! Runs a Metropolis-Hastings walk with optional restart moves for a substitution level.
     subroutine metropolis_level(level, total_sites, config, temperature, samples_level, total_comb, use_parallel, &
                                  summary_unit, summary_txt_unit)
         integer, intent(in) :: level, total_sites, samples_level
@@ -614,6 +666,10 @@ contains
         integer :: best_step
         integer :: burn_keep, burn_start
         logical :: best_in_subset
+        real(dp), parameter :: restart_move_prob = 0.01_dp
+        logical :: use_restart_move
+        integer :: restart_attempts, restart_accepts
+        integer :: flip_attempts, flip_accepts
 
         if (level == 0) then
             call exhaustive_level(level, total_sites, config, temperature, total_comb, 1, use_parallel, &
@@ -643,42 +699,61 @@ contains
         call open_mc_trace_file(level, trace_unit)
         if (trace_unit /= 0) then
             call write_mc_trace_step(trace_unit, accept_count, 0, current_energy, current_low, current_high)
+            call flush(trace_unit)
         end if
 
         max_trials = samples_level * 100
         i_attempt = 0
+        restart_attempts = 0
+        restart_accepts = 0
+        flip_attempts = 0
+        flip_accepts = 0
 
         do while (accept_count < samples_level .and. i_attempt < max_trials)
             i_attempt = i_attempt + 1
             trial_subset = current_subset
 
             call random_number(rand_num)
-            remove_idx = int(rand_num * real(level, dp)) + 1
+            use_restart_move = (rand_num < restart_move_prob)
 
-            tries = 0
-            valid_trial = .false.
-            do while (.not. valid_trial .and. tries < total_sites * 2)
-                tries = tries + 1
+            if (use_restart_move) then
+                call random_subset(total_sites, level, trial_subset)
+                if (all(trial_subset(1:level) == current_subset(1:level))) cycle
+                restart_attempts = restart_attempts + 1
+            else
                 call random_number(rand_num)
-                add_site = int(rand_num * real(total_sites, dp)) + 1
-                if (.not. any(trial_subset == add_site)) then
-                    trial_subset(remove_idx) = add_site
-                    call sort_int_ascending(trial_subset, level)
-                    valid_trial = .true.
-                end if
-            end do
-            if (.not. valid_trial) cycle
+                remove_idx = int(rand_num * real(level, dp)) + 1
+
+                tries = 0
+                valid_trial = .false.
+                do while (.not. valid_trial .and. tries < total_sites * 2)
+                    tries = tries + 1
+                    call random_number(rand_num)
+                    add_site = int(rand_num * real(total_sites, dp)) + 1
+                    if (.not. any(trial_subset == add_site)) then
+                        trial_subset(remove_idx) = add_site
+                        call sort_int_ascending(trial_subset, level)
+                        valid_trial = .true.
+                    end if
+                end do
+                if (.not. valid_trial) cycle
+                flip_attempts = flip_attempts + 1
+            end if
 
             config = 1
             config(trial_subset(1:level)) = 2
             call calculate_structure_energy(config, total_sites, trial_energy, trial_low, trial_high)
 
-            delta_e = trial_energy - current_energy
-            if (delta_e <= 0.0_dp) then
+            if (use_restart_move .and. force_restart_accept) then
                 accepted = .true.
             else
-                call random_number(rand_num)
-                accepted = (rand_num < exp(-beta * delta_e))
+                delta_e = trial_energy - current_energy
+                if (delta_e <= 0.0_dp) then
+                    accepted = .true.
+                else
+                    call random_number(rand_num)
+                    accepted = (rand_num < exp(-beta * delta_e))
+                end if
             end if
 
             if (accepted) then
@@ -687,6 +762,11 @@ contains
                 current_energy = trial_energy
                 current_low = trial_low
                 current_high = trial_high
+                if (use_restart_move) then
+                    restart_accepts = restart_accepts + 1
+                else
+                    flip_accepts = flip_accepts + 1
+                end if
                 energies(accept_count) = current_energy
                 energies_low(accept_count) = current_low
                 energies_high(accept_count) = current_high
@@ -698,6 +778,7 @@ contains
                 end if
                 if (trace_unit /= 0) then
                     call write_mc_trace_step(trace_unit, accept_count, i_attempt, current_energy, current_low, current_high)
+                    call flush(trace_unit)
                 end if
             else
                 skipped = skipped + 1
@@ -711,18 +792,20 @@ contains
             write(*,'(A,I0)') 'Metropolis: configuraciones descartadas en equilibrado = ', burn_start - 1
         end if
 
-    call summarize_level(level, total_sites, temperature, total_comb, real(accept_count, dp), &
+        call summarize_level(level, total_sites, temperature, total_comb, real(accept_count, dp), &
                  energies(burn_start:accept_count), best_energy, best_subset, best_count, skipped, &
                  energies_low(burn_start:accept_count), energies_high(burn_start:accept_count), &
-                 use_parallel, summary_unit, summary_txt_unit, best_in_subset)
+                 use_parallel, summary_unit, summary_txt_unit, best_in_subset, &
+                 restart_attempts, restart_accepts, flip_attempts, flip_accepts)
 
         if (trace_unit /= 0) call close_mc_trace_file(trace_unit)
         deallocate(energies, energies_low, energies_high)
     end subroutine metropolis_level
 
+    ! Computes Boltzmann statistics for a level and records them to screen and summaries.
     subroutine summarize_level(level, total_sites, temperature, total_comb, processed, energies, best_energy, best_positions, &
                                best_count, skipped, energies_low, energies_high, use_parallel, summary_unit, summary_txt_unit, &
-                               best_included)
+                               best_included, restart_attempts, restart_accepts, flip_attempts, flip_accepts)
         integer, intent(in) :: level, total_sites
         real(dp), intent(in) :: temperature, processed
         integer(ip), intent(in) :: total_comb
@@ -735,20 +818,22 @@ contains
         logical, intent(in) :: use_parallel
         integer, intent(in) :: summary_unit, summary_txt_unit
         logical, intent(in), optional :: best_included
+        integer, intent(in), optional :: restart_attempts, restart_accepts
+        integer, intent(in), optional :: flip_attempts, flip_accepts
 
-    real(dp) :: beta, emin, expected, wsum, variance, prob_best
-    real(dp) :: expected_low, expected_high, wsum_low, wsum_high
-    real(dp) :: low_ref, high_ref, expected_mix, weight_low, weight_high
-    real(dp) :: ge_fraction
-    real(dp) :: expected_sum, variance_sum
-    real(dp) :: expected_low_sum, expected_high_sum
-    real(dp), allocatable :: weights(:)
-    real(dp), allocatable :: weights_low(:), weights_high(:)
-    integer :: i, ncomb
+        real(dp) :: beta, emin, expected, wsum, variance, prob_best
+        real(dp) :: expected_low, expected_high, wsum_low, wsum_high
+        real(dp) :: low_ref, high_ref, expected_mix, weight_low, weight_high
+        real(dp) :: ge_fraction
+        real(dp) :: expected_sum, variance_sum
+        real(dp) :: expected_low_sum, expected_high_sum
+        real(dp), allocatable :: weights(:)
+        real(dp), allocatable :: weights_low(:), weights_high(:)
+        integer :: i, ncomb
         character(len=80), parameter :: separator = '------------------------------------------------------------------------'
-    character(len=32) :: total_str
-    character(len=32) :: level_str
-    logical :: have_low, have_high, valid_low, valid_high
+        character(len=32) :: total_str
+        character(len=32) :: level_str
+        logical :: have_low, have_high, valid_low, valid_high
         real(dp) :: low_min, high_min
     character(len=32) :: label_low, label_high
     character(len=32) :: exp_low_str, exp_high_str, mix_exp_str, frac_str
@@ -768,6 +853,10 @@ contains
     real(dp) :: accept_ratio, total_trials
     real(dp) :: emin_ref
     logical :: best_sampled
+    logical :: have_move_stats
+    integer :: restart_attempts_val, restart_accepts_val
+    integer :: flip_attempts_val, flip_accepts_val
+    real(dp) :: restart_ratio, flip_ratio
 
         if (.not. use_parallel) then
             continue
@@ -824,24 +913,24 @@ contains
         exp_high_str = ' --'
         mix_exp_str = ' --'
         frac_str = ' --'
-    delta_exp_total_str = ' --'
-    delta_min_total_str = ' --'
-    delta_exp_low_str = ' --'
-    delta_min_low_str = ' --'
-    delta_exp_high_str = ' --'
-    delta_min_high_str = ' --'
-    delta_mix_str = ' --'
+        delta_exp_total_str = ' --'
+        delta_min_total_str = ' --'
+        delta_exp_low_str = ' --'
+        delta_min_low_str = ' --'
+        delta_exp_high_str = ' --'
+        delta_min_high_str = ' --'
+        delta_mix_str = ' --'
         expected_low = huge_marker
         expected_high = huge_marker
         low_min = 0.0_dp
         high_min = 0.0_dp
-    rel_exp_total = huge_marker
-    rel_min_total = huge_marker
-    rel_exp_low = huge_marker
-    rel_min_low = huge_marker
-    rel_exp_high = huge_marker
-    rel_min_high = huge_marker
-    rel_exp_mix = huge_marker
+        rel_exp_total = huge_marker
+        rel_min_total = huge_marker
+        rel_exp_low = huge_marker
+        rel_min_low = huge_marker
+        rel_exp_high = huge_marker
+        rel_min_high = huge_marker
+        rel_exp_mix = huge_marker
 
         if (have_low) then
             low_min = minval(energies_low)
@@ -913,9 +1002,9 @@ contains
             write(mix_exp_str,'(F12.6)') expected_mix
         end if
 
-    write(exp_total_str,'(F12.6)') expected
+        write(exp_total_str,'(F12.6)') expected
         write(min_total_str,'(F12.6)') best_energy
-    write(variance_str,'(F12.6)') variance
+        write(variance_str,'(F12.6)') variance
         rel_exp_total = quartz_relative(level, total_sites, expected)
         rel_min_total = quartz_relative(level, total_sites, best_energy)
         write(delta_exp_total_str,'(F12.6)') rel_exp_total
@@ -952,9 +1041,9 @@ contains
         write(*,'(A,F10.0)') 'Configuraciones procesadas: ', processed
         write(*,'(A,I8)') 'Intentos descartados: ', max(skipped, 0)
         write(*,'(A,F12.6)') 'Energía mínima (eV): ', best_energy
-    write(*,'(A,F12.6)') 'Energía esperada <E> (eV): ', expected
-    write(*,'(A,F12.6)') 'Varianza respecto a <E> (eV^2): ', variance
-    write(*,'(A,F12.6)') 'Desviación estándar (eV): ', sqrt(variance)
+        write(*,'(A,F12.6)') 'Energía esperada <E> (eV): ', expected
+        write(*,'(A,F12.6)') 'Varianza respecto a <E> (eV^2): ', variance
+        write(*,'(A,F12.6)') 'Desviación estándar (eV): ', sqrt(variance)
         write(*,'(A,A)') 'Energía mínima lado Si (eV): ', trim(label_low)
         write(*,'(A,A)') 'Energía esperada lado Si (eV): ', trim(exp_low_str)
         write(*,'(A,A)') 'Energía mínima lado Ge (eV): ', trim(label_high)
@@ -962,6 +1051,28 @@ contains
         write(*,'(A,A)') 'Energía esperada combinada (eV): ', trim(mix_exp_str)
         write(*,'(A,F10.6)') 'Probabilidad Boltzmann del mínimo: ', prob_best
         write(*,'(A,F8.4)') 'Ratio de aceptación: ', accept_ratio
+        have_move_stats = present(restart_attempts) .and. present(restart_accepts) .and. &
+                          present(flip_attempts) .and. present(flip_accepts)
+        if (have_move_stats) then
+            restart_attempts_val = restart_attempts
+            restart_accepts_val = restart_accepts
+            flip_attempts_val = flip_attempts
+            flip_accepts_val = flip_accepts
+            if (restart_attempts_val > 0) then
+                restart_ratio = real(restart_accepts_val, dp) / real(restart_attempts_val, dp)
+            else
+                restart_ratio = 0.0_dp
+            end if
+            if (flip_attempts_val > 0) then
+                flip_ratio = real(flip_accepts_val, dp) / real(flip_attempts_val, dp)
+            else
+                flip_ratio = 0.0_dp
+            end if
+            write(*,'(A,I8,A,I8,A,F8.4)') 'Restart aceptados: ', restart_accepts_val, ' / ', restart_attempts_val, &
+                '  ratio: ', restart_ratio
+            write(*,'(A,I8,A,I8,A,F8.4)') 'Flip aceptados:    ', flip_accepts_val, ' / ', flip_attempts_val, &
+                '  ratio: ', flip_ratio
+        end if
         call print_best_positions(best_positions, best_count)
         call save_best_structure_poscar(level, total_sites, best_positions, best_count)
         if (processed < real(total_comb, dp)) then
@@ -998,20 +1109,22 @@ contains
         deallocate(weights)
     end subroutine summarize_level
 
+    ! Sorts the summary files by substitution level to keep outputs monotonic.
     subroutine reorder_summary_outputs()
         call reorder_single_summary(summary_filename, ';')
         call reorder_single_summary(summary_txt_filename, ' ')
     end subroutine reorder_summary_outputs
 
+    ! Loads a summary file, sorts its lines by level, and writes it back.
     subroutine reorder_single_summary(filename, delimiter)
         character(len=*), intent(in) :: filename
         character(len=1), intent(in) :: delimiter
-    integer :: unit, ios, raw_count, idx, level_val
+        integer :: unit, ios, raw_count, idx, level_val
         character(len=512) :: header_line
         character(len=512) :: line
         character(len=512), allocatable :: lines(:)
-    integer, allocatable :: levels(:)
-    integer :: actual_count
+        integer, allocatable :: levels(:)
+        integer :: actual_count
 
         open(newunit=unit, file=filename, status='old', action='read', iostat=ios)
         if (ios /= 0) then
@@ -1080,6 +1193,7 @@ contains
         deallocate(lines, levels)
     end subroutine reorder_single_summary
 
+    ! Parses the leading level integer from a delimited summary line.
     integer function extract_level_from_line(line, delimiter) result(level_val)
         character(len=*), intent(in) :: line
         character(len=1), intent(in) :: delimiter
@@ -1124,6 +1238,7 @@ contains
         end if
     end function extract_level_from_line
 
+    ! Performs insertion sort on parallel arrays of levels and lines.
     subroutine sort_lines_by_level(levels, lines, n)
         integer, intent(inout) :: levels(:)
         character(len=*), intent(inout) :: lines(:)
@@ -1145,10 +1260,10 @@ contains
         end do
     end subroutine sort_lines_by_level
 
+    ! Converts an energy to a relative enthalpy per atom with quartz references.
     real(dp) function quartz_relative(level, total_sites, energy) result(rel_val)
         integer, intent(in) :: level, total_sites
         real(dp), intent(in) :: energy
-
         real(dp) :: ge_atoms, si_atoms, denom
 
         if (total_sites <= 0) then
@@ -1161,6 +1276,7 @@ contains
         rel_val = conv_ev_to_kjmol * (energy - ge_atoms * quartz_ge_energy - si_atoms * quartz_si_energy) / denom
     end function quartz_relative
 
+    ! Evaluates the empirical mixing weight based on the Ge fraction.
     real(dp) function mixing_weight(ge_fraction) result(weight)
         real(dp), intent(in) :: ge_fraction
         real(dp) :: arg, numerator, denom_base, denominator
@@ -1181,6 +1297,7 @@ contains
         weight = max(0.0_dp, min(1.0_dp, weight))
     end function mixing_weight
 
+    ! Writes the minimum-energy configuration for a level as a VASP POSCAR file.
     subroutine save_best_structure_poscar(level, total_sites, best_positions, best_count)
         integer, intent(in) :: level, total_sites, best_count
         integer, intent(in) :: best_positions(:)
@@ -1223,6 +1340,7 @@ contains
         deallocate(best_config)
     end subroutine save_best_structure_poscar
 
+    ! Creates a trace CSV for Monte Carlo steps at the specified level.
     subroutine open_mc_trace_file(level, unit_id)
         integer, intent(in) :: level
         integer, intent(out) :: unit_id
@@ -1239,6 +1357,7 @@ contains
         end if
     end subroutine open_mc_trace_file
 
+    ! Appends one Monte Carlo sample entry to the trace CSV if the unit is valid.
     subroutine write_mc_trace_step(unit_id, step_idx, attempt_idx, energy, energy_low, energy_high)
         integer, intent(in) :: unit_id
         integer, intent(in) :: step_idx, attempt_idx
@@ -1248,12 +1367,14 @@ contains
         write(unit_id,'(I0,";",I0,";",F18.10,";",F18.10,";",F18.10)') step_idx, attempt_idx, energy, energy_low, energy_high
     end subroutine write_mc_trace_step
 
+    ! Closes the trace CSV unit when tracing has finished.
     subroutine close_mc_trace_file(unit_id)
         integer, intent(in) :: unit_id
 
         if (unit_id /= 0) close(unit_id)
     end subroutine close_mc_trace_file
 
+    ! Prints the indices of the lowest-energy configuration sampled for a level.
     subroutine print_best_positions(best_positions, best_count)
         integer, intent(in) :: best_positions(:)
         integer, intent(in) :: best_count

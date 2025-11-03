@@ -1,0 +1,40 @@
+
+Geometry = GenFormat {
+ <<< geo.gen
+}
+
+Hamiltonian = xTB {
+  Method = "GFN2-xTB"
+  SCC = Yes
+  SCCTolerance = 1e-08
+  MaxSCCIterations  = 500
+  ReadInitialCharges = No
+  KPointsAndWeights = SupercellFolding {
+    1 0 0
+    0 1 0
+    0 0 1
+    0.5 0.5 0.5
+  }
+
+  Filling = Fermi {
+   Temperature[K] = 0.0
+  }
+}
+Driver = GeometryOptimization {
+  LatticeOpt = Yes
+  Optimiser = Rational { DiagLimit = 1.0e-2 }
+  AppendGeometries = Yes
+}
+
+Parallel = {
+  Groups = 1
+  UseOmpThreads = Yes
+  Blacs = BlockSize {
+32
+  }
+}
+Options = {
+  WriteDetailedOut = Yes
+  RandomSeed = 0
+}
+
