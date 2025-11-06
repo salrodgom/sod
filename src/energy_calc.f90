@@ -13,7 +13,7 @@
 MODULE energy_calc
     IMPLICIT NONE
     PRIVATE
-    PUBLIC :: calculate_structure_energy, init_energy_calc, cleanup_energy_calc, write_vasp_file, write_eqmatrix_file, get_eqmatrix
+    PUBLIC :: calculate_structure_energy, init_energy_calc, cleanup_energy_calc, write_vasp_file, write_eqmatrix_file, get_eqmatrix, get_base_energy, get_max_low_order, get_max_high_order
 
     ! Parameters from spbesod
     INTEGER, PARAMETER :: dp = KIND(1.0D0)
@@ -1412,27 +1412,38 @@ MODULE energy_calc
             END DO
         END FUNCTION get_high_triplet
 
-    SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, energy_high_side)
+    SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, energy_high_side, low_contrib, high_contrib)
         IMPLICIT NONE
         INTEGER, INTENT(IN) :: n_sites
         INTEGER, INTENT(IN) :: config(n_sites)
         REAL(dp), INTENT(OUT) :: energy
         REAL(dp), INTENT(OUT), OPTIONAL :: energy_low_side
         REAL(dp), INTENT(OUT), OPTIONAL :: energy_high_side
-    INTEGER :: i, j, k, l, op
-    INTEGER :: mapped_i, mapped_j, mapped_k, mapped_l
-    INTEGER :: ii, jj, kk, idx
-    INTEGER :: arr4(4)
-    REAL(dp) :: min_energy_low, min_energy_high, energy_tmp, energy_high_tmp
-    REAL(dp) :: huge_val
+        REAL(dp), INTENT(OUT), OPTIONAL :: low_contrib(:)
+        REAL(dp), INTENT(OUT), OPTIONAL :: high_contrib(:)
+        INTEGER :: i, j, k, l, op
+        INTEGER :: mapped_i, mapped_j, mapped_k, mapped_l
+        INTEGER :: ii, jj, kk, idx
+        INTEGER :: arr4(4)
+        REAL(dp) :: min_energy_low, min_energy_high, energy_tmp, energy_high_tmp
+        REAL(dp) :: huge_val
         INTEGER :: nge, nsi
+        INTEGER :: nge_counter, nsi_counter
         LOGICAL :: can_use_high
-    REAL(dp) :: x_ge, w_low, w_high, mix_beta
-        
+        REAL(dp) :: x_ge, w_low, w_high, mix_beta
+        REAL(dp) :: best_low_contrib(4), best_high_contrib(4)
+        REAL(dp) :: low_contrib_local(4), high_contrib_local(4)
+        REAL(dp) :: min_energy_low_thread, min_energy_high_thread
+        REAL(dp) :: best_low_contrib_thread(4), best_high_contrib_thread(4)
+        INTEGER, ALLOCATABLE :: ge_pos_buf(:), si_pos_buf(:)
+        INTEGER, ALLOCATABLE :: ge_map_buf_local(:), si_map_buf_local(:)
+
         huge_val = HUGE(1.0_dp)
         min_energy_low = huge_val
         min_energy_high = huge_val
-        
+        best_low_contrib = 0.0_dp
+        best_high_contrib = 0.0_dp
+
         ! Ensure we have a site->position mapping
         IF (.NOT. ALLOCATED(subpos)) THEN
             WRITE(*,*) 'Error: substitution position mapping (subpos) not initialized.'
@@ -1445,131 +1456,83 @@ MODULE energy_calc
 
         nge = COUNT(config == 2)
         nsi = n_sites - nge
+
+        IF (nge > 0) ALLOCATE(ge_pos_buf(nge))
+        IF (nsi > 0) ALLOCATE(si_pos_buf(nsi))
+
+        IF (nge > 0 .OR. nsi > 0) THEN
+            nge_counter = 0
+            nsi_counter = 0
+            DO i = 1, n_sites
+                IF (config(i) == 2) THEN
+                    nge_counter = nge_counter + 1
+                    ge_pos_buf(nge_counter) = subpos(i)
+                ELSE
+                    nsi_counter = nsi_counter + 1
+                    si_pos_buf(nsi_counter) = subpos(i)
+                END IF
+            END DO
+        END IF
+
         can_use_high = high_base_loaded
         IF (nsi > 0 .AND. .NOT. ALLOCATED(hE1)) can_use_high = .FALSE.
 
-        ! Try all symmetry operations to find the lowest energy
-        DO op = 1, nop
-            energy_tmp = E0
-            
-            ! Add one-body terms (Ge substitutions)
-            DO i = 1, n_sites
-                IF (config(i) == 2) THEN
-                    mapped_i = eqmatrix(op, subpos(i))
-                    energy_tmp = energy_tmp + dE1(mapped_i)
-                END IF
-            END DO
-            
-            ! Add two-body interactions
-            DO i = 1, n_sites
-                DO j = i+1, n_sites
-                    IF (config(i) == 2 .AND. config(j) == 2) THEN
-                        mapped_i = eqmatrix(op, subpos(i))
-                        mapped_j = eqmatrix(op, subpos(j))
-                        IF (mapped_i < mapped_j) THEN
-                            energy_tmp = energy_tmp + dE2(mapped_i,mapped_j)
-                        ELSE
-                            energy_tmp = energy_tmp + dE2(mapped_j,mapped_i)
-                        END IF
-                    END IF
-                END DO
-            END DO
+        ! Try all symmetry operations; OpenMP distributes operations when available
+        !$omp parallel default(shared) private(op, energy_tmp, energy_high_tmp, i, j, k, l, mapped_i, mapped_j, mapped_k, mapped_l, ii, jj, kk, idx, arr4, &
+        !$omp&     min_energy_low_thread, min_energy_high_thread, best_low_contrib_thread, best_high_contrib_thread, low_contrib_local, high_contrib_local, &
+        !$omp&     ge_map_buf_local, si_map_buf_local)
 
-            ! Add three-body interactions (if available, sparse list)
-            IF (ALLOCATED(dE3_i)) THEN
-                DO i = 1, n_sites
-                    DO j = i+1, n_sites
-                        DO k = j+1, n_sites
-                            IF (config(i) == 2 .AND. config(j) == 2 .AND. config(k) == 2) THEN
-                                mapped_i = eqmatrix(op, subpos(i))
-                                mapped_j = eqmatrix(op, subpos(j))
-                                mapped_k = eqmatrix(op, subpos(k))
-                                ii = MIN(mapped_i, MIN(mapped_j,mapped_k))
-                                kk = MAX(mapped_i, MAX(mapped_j,mapped_k))
-                                jj = mapped_i + mapped_j + mapped_k - ii - kk
-                                IF (n_dE3 > 0) THEN
-                                    DO idx = 1, n_dE3
-                                        IF (dE3_i(idx) == ii .AND. dE3_j(idx) == jj .AND. dE3_k(idx) == kk) THEN
-                                            energy_tmp = energy_tmp + dE3_val(idx)
-                                            EXIT
-                                        END IF
-                                    END DO
-                                END IF
-                            END IF
-                        END DO
-                    END DO
-                END DO
-            END IF
+            min_energy_low_thread = huge_val
+            min_energy_high_thread = huge_val
+            best_low_contrib_thread = 0.0_dp
+            best_high_contrib_thread = 0.0_dp
 
-            IF (ALLOCATED(dE4_i) .AND. n_dE4 > 0) THEN
-                DO i = 1, n_sites
-                    DO j = i+1, n_sites
-                        DO k = j+1, n_sites
-                            DO l = k+1, n_sites
-                                IF (config(i) == 2 .AND. config(j) == 2 .AND. config(k) == 2 .AND. config(l) == 2) THEN
-                                    mapped_i = eqmatrix(op, subpos(i))
-                                    mapped_j = eqmatrix(op, subpos(j))
-                                    mapped_k = eqmatrix(op, subpos(k))
-                                    mapped_l = eqmatrix(op, subpos(l))
-                                    arr4 = (/ mapped_i, mapped_j, mapped_k, mapped_l /)
-                                    CALL sort_int_small(arr4, 4)
-                                    DO idx = 1, n_dE4
-                                        IF (dE4_i(idx) == arr4(1) .AND. dE4_j(idx) == arr4(2) .AND. &
-                                            dE4_k(idx) == arr4(3) .AND. dE4_l(idx) == arr4(4)) THEN
-                                            energy_tmp = energy_tmp + dE4_val(idx)
-                                            EXIT
-                                        END IF
-                                    END DO
-                                END IF
-                            END DO
-                        END DO
-                    END DO
-                END DO
-            END IF
+            IF (nge > 0) ALLOCATE(ge_map_buf_local(nge))
+            IF (can_use_high .AND. nsi > 0) ALLOCATE(si_map_buf_local(nsi))
 
-            min_energy_low = MIN(min_energy_low, energy_tmp)
+            !$omp do schedule(static)
+            DO op = 1, nop
+                energy_tmp = E0
+                low_contrib_local = 0.0_dp
 
-            IF (can_use_high) THEN
-                energy_high_tmp = E0_high
-                IF (nsi > 0 .AND. ALLOCATED(hE1)) THEN
-                    DO i = 1, n_sites
-                        IF (config(i) == 1) THEN
-                            mapped_i = eqmatrix(op, subpos(i))
-                            energy_high_tmp = energy_high_tmp + hE1(mapped_i)
-                        END IF
+                IF (nge > 0) THEN
+                    DO i = 1, nge
+                        ge_map_buf_local(i) = eqmatrix(op, ge_pos_buf(i))
+                        low_contrib_local(1) = low_contrib_local(1) + dE1(ge_map_buf_local(i))
+                        energy_tmp = energy_tmp + dE1(ge_map_buf_local(i))
                     END DO
                 END IF
-                IF (nsi > 1 .AND. ALLOCATED(hE2)) THEN
-                    DO i = 1, n_sites
-                        IF (config(i) /= 1) CYCLE
-                        mapped_i = eqmatrix(op, subpos(i))
-                        DO j = i+1, n_sites
-                            IF (config(j) /= 1) CYCLE
-                            mapped_j = eqmatrix(op, subpos(j))
+
+                IF (nge > 1) THEN
+                    DO i = 1, nge - 1
+                        mapped_i = ge_map_buf_local(i)
+                        DO j = i + 1, nge
+                            mapped_j = ge_map_buf_local(j)
                             IF (mapped_i < mapped_j) THEN
-                                energy_high_tmp = energy_high_tmp + hE2(mapped_i, mapped_j)
+                                low_contrib_local(2) = low_contrib_local(2) + dE2(mapped_i, mapped_j)
+                                energy_tmp = energy_tmp + dE2(mapped_i, mapped_j)
                             ELSE
-                                energy_high_tmp = energy_high_tmp + hE2(mapped_j, mapped_i)
+                                low_contrib_local(2) = low_contrib_local(2) + dE2(mapped_j, mapped_i)
+                                energy_tmp = energy_tmp + dE2(mapped_j, mapped_i)
                             END IF
                         END DO
                     END DO
                 END IF
-                IF (nsi > 2 .AND. ALLOCATED(hE3_i) .AND. n_h_dE3 > 0) THEN
-                    DO i = 1, n_sites
-                        IF (config(i) /= 1) CYCLE
-                        DO j = i+1, n_sites
-                            IF (config(j) /= 1) CYCLE
-                            DO k = j+1, n_sites
-                                IF (config(k) /= 1) CYCLE
-                                mapped_i = eqmatrix(op, subpos(i))
-                                mapped_j = eqmatrix(op, subpos(j))
-                                mapped_k = eqmatrix(op, subpos(k))
+
+                IF (nge > 2 .AND. ALLOCATED(dE3_i) .AND. n_dE3 > 0) THEN
+                    DO i = 1, nge - 2
+                        mapped_i = ge_map_buf_local(i)
+                        DO j = i + 1, nge - 1
+                            mapped_j = ge_map_buf_local(j)
+                            DO k = j + 1, nge
+                                mapped_k = ge_map_buf_local(k)
                                 ii = MIN(mapped_i, MIN(mapped_j, mapped_k))
                                 kk = MAX(mapped_i, MAX(mapped_j, mapped_k))
                                 jj = mapped_i + mapped_j + mapped_k - ii - kk
-                                DO idx = 1, n_h_dE3
-                                    IF (hE3_i(idx) == ii .AND. hE3_j(idx) == jj .AND. hE3_k(idx) == kk) THEN
-                                        energy_high_tmp = energy_high_tmp + hE3_val(idx)
+                                DO idx = 1, n_dE3
+                                    IF (dE3_i(idx) == ii .AND. dE3_j(idx) == jj .AND. dE3_k(idx) == kk) THEN
+                                        low_contrib_local(3) = low_contrib_local(3) + dE3_val(idx)
+                                        energy_tmp = energy_tmp + dE3_val(idx)
                                         EXIT
                                     END IF
                                 END DO
@@ -1577,25 +1540,23 @@ MODULE energy_calc
                         END DO
                     END DO
                 END IF
-                IF (nsi > 3 .AND. ALLOCATED(hE4_i) .AND. n_h_dE4 > 0) THEN
-                    DO i = 1, n_sites
-                        IF (config(i) /= 1) CYCLE
-                        DO j = i+1, n_sites
-                            IF (config(j) /= 1) CYCLE
-                            DO k = j+1, n_sites
-                                IF (config(k) /= 1) CYCLE
-                                DO l = k+1, n_sites
-                                    IF (config(l) /= 1) CYCLE
-                                    mapped_i = eqmatrix(op, subpos(i))
-                                    mapped_j = eqmatrix(op, subpos(j))
-                                    mapped_k = eqmatrix(op, subpos(k))
-                                    mapped_l = eqmatrix(op, subpos(l))
+
+                IF (nge > 3 .AND. ALLOCATED(dE4_i) .AND. n_dE4 > 0) THEN
+                    DO i = 1, nge - 3
+                        mapped_i = ge_map_buf_local(i)
+                        DO j = i + 1, nge - 2
+                            mapped_j = ge_map_buf_local(j)
+                            DO k = j + 1, nge - 1
+                                mapped_k = ge_map_buf_local(k)
+                                DO l = k + 1, nge
+                                    mapped_l = ge_map_buf_local(l)
                                     arr4 = (/ mapped_i, mapped_j, mapped_k, mapped_l /)
                                     CALL sort_int_small(arr4, 4)
-                                    DO idx = 1, n_h_dE4
-                                        IF (hE4_i(idx) == arr4(1) .AND. hE4_j(idx) == arr4(2) .AND. &
-                                            hE4_k(idx) == arr4(3) .AND. hE4_l(idx) == arr4(4)) THEN
-                                            energy_high_tmp = energy_high_tmp + hE4_val(idx)
+                                    DO idx = 1, n_dE4
+                                        IF (dE4_i(idx) == arr4(1) .AND. dE4_j(idx) == arr4(2) .AND. &
+                                            dE4_k(idx) == arr4(3) .AND. dE4_l(idx) == arr4(4)) THEN
+                                            low_contrib_local(4) = low_contrib_local(4) + dE4_val(idx)
+                                            energy_tmp = energy_tmp + dE4_val(idx)
                                             EXIT
                                         END IF
                                     END DO
@@ -1604,9 +1565,117 @@ MODULE energy_calc
                         END DO
                     END DO
                 END IF
-                min_energy_high = MIN(min_energy_high, energy_high_tmp)
-            END IF
-        END DO
+
+                IF (energy_tmp < min_energy_low_thread) THEN
+                    min_energy_low_thread = energy_tmp
+                    best_low_contrib_thread = low_contrib_local
+                END IF
+
+                IF (can_use_high) THEN
+                    energy_high_tmp = E0_high
+                    high_contrib_local = 0.0_dp
+
+                    IF (nsi > 0) THEN
+                        DO i = 1, nsi
+                            si_map_buf_local(i) = eqmatrix(op, si_pos_buf(i))
+                        END DO
+                    END IF
+
+                    IF (nsi > 0 .AND. ALLOCATED(hE1)) THEN
+                        DO i = 1, nsi
+                            high_contrib_local(1) = high_contrib_local(1) + hE1(si_map_buf_local(i))
+                            energy_high_tmp = energy_high_tmp + hE1(si_map_buf_local(i))
+                        END DO
+                    END IF
+
+                    IF (nsi > 1 .AND. ALLOCATED(hE2)) THEN
+                        DO i = 1, nsi - 1
+                            mapped_i = si_map_buf_local(i)
+                            DO j = i + 1, nsi
+                                mapped_j = si_map_buf_local(j)
+                                IF (mapped_i < mapped_j) THEN
+                                    high_contrib_local(2) = high_contrib_local(2) + hE2(mapped_i, mapped_j)
+                                    energy_high_tmp = energy_high_tmp + hE2(mapped_i, mapped_j)
+                                ELSE
+                                    high_contrib_local(2) = high_contrib_local(2) + hE2(mapped_j, mapped_i)
+                                    energy_high_tmp = energy_high_tmp + hE2(mapped_j, mapped_i)
+                                END IF
+                            END DO
+                        END DO
+                    END IF
+
+                    IF (nsi > 2 .AND. ALLOCATED(hE3_i) .AND. n_h_dE3 > 0) THEN
+                        DO i = 1, nsi - 2
+                            mapped_i = si_map_buf_local(i)
+                            DO j = i + 1, nsi - 1
+                                mapped_j = si_map_buf_local(j)
+                                DO k = j + 1, nsi
+                                    mapped_k = si_map_buf_local(k)
+                                    ii = MIN(mapped_i, MIN(mapped_j, mapped_k))
+                                    kk = MAX(mapped_i, MAX(mapped_j, mapped_k))
+                                    jj = mapped_i + mapped_j + mapped_k - ii - kk
+                                    DO idx = 1, n_h_dE3
+                                        IF (hE3_i(idx) == ii .AND. hE3_j(idx) == jj .AND. hE3_k(idx) == kk) THEN
+                                            high_contrib_local(3) = high_contrib_local(3) + hE3_val(idx)
+                                            energy_high_tmp = energy_high_tmp + hE3_val(idx)
+                                            EXIT
+                                        END IF
+                                    END DO
+                                END DO
+                            END DO
+                        END DO
+                    END IF
+
+                    IF (nsi > 3 .AND. ALLOCATED(hE4_i) .AND. n_h_dE4 > 0) THEN
+                        DO i = 1, nsi - 3
+                            mapped_i = si_map_buf_local(i)
+                            DO j = i + 1, nsi - 2
+                                mapped_j = si_map_buf_local(j)
+                                DO k = j + 1, nsi - 1
+                                    mapped_k = si_map_buf_local(k)
+                                    DO l = k + 1, nsi
+                                        mapped_l = si_map_buf_local(l)
+                                        arr4 = (/ mapped_i, mapped_j, mapped_k, mapped_l /)
+                                        CALL sort_int_small(arr4, 4)
+                                        DO idx = 1, n_h_dE4
+                                            IF (hE4_i(idx) == arr4(1) .AND. hE4_j(idx) == arr4(2) .AND. &
+                                                hE4_k(idx) == arr4(3) .AND. hE4_l(idx) == arr4(4)) THEN
+                                                high_contrib_local(4) = high_contrib_local(4) + hE4_val(idx)
+                                                energy_high_tmp = energy_high_tmp + hE4_val(idx)
+                                                EXIT
+                                            END IF
+                                        END DO
+                                    END DO
+                                END DO
+                            END DO
+                        END DO
+                    END IF
+
+                    IF (energy_high_tmp < min_energy_high_thread) THEN
+                        min_energy_high_thread = energy_high_tmp
+                        best_high_contrib_thread = high_contrib_local
+                    END IF
+                END IF
+            END DO
+            !$omp end do
+
+            IF (ALLOCATED(ge_map_buf_local)) DEALLOCATE(ge_map_buf_local)
+            IF (ALLOCATED(si_map_buf_local)) DEALLOCATE(si_map_buf_local)
+
+            !$omp critical
+                IF (min_energy_low_thread < min_energy_low) THEN
+                    min_energy_low = min_energy_low_thread
+                    best_low_contrib = best_low_contrib_thread
+                END IF
+                IF (can_use_high .AND. min_energy_high_thread < min_energy_high) THEN
+                    min_energy_high = min_energy_high_thread
+                    best_high_contrib = best_high_contrib_thread
+                END IF
+            !$omp end critical
+        !$omp end parallel
+
+        IF (ALLOCATED(ge_pos_buf)) DEALLOCATE(ge_pos_buf)
+        IF (ALLOCATED(si_pos_buf)) DEALLOCATE(si_pos_buf)
 
         IF (.NOT. can_use_high .OR. min_energy_high >= huge_val) THEN
             energy = min_energy_low
@@ -1627,8 +1696,37 @@ MODULE energy_calc
                 energy_high_side = min_energy_high
             END IF
         END IF
-        
+
+        IF (PRESENT(low_contrib)) THEN
+            IF (SIZE(low_contrib) >= 4) THEN
+                low_contrib(1:4) = best_low_contrib
+            ELSE
+                low_contrib(1:SIZE(low_contrib)) = best_low_contrib(1:SIZE(low_contrib))
+            END IF
+        END IF
+
+        IF (PRESENT(high_contrib)) THEN
+            IF (SIZE(high_contrib) >= 4) THEN
+                high_contrib(1:4) = best_high_contrib
+            ELSE
+                high_contrib(1:SIZE(high_contrib)) = best_high_contrib(1:SIZE(high_contrib))
+            END IF
+        END IF
+
     END SUBROUTINE calculate_structure_energy
+
+    FUNCTION get_base_energy() RESULT(base_energy)
+        REAL(dp) :: base_energy
+        base_energy = E0
+    END FUNCTION get_base_energy
+
+    INTEGER FUNCTION get_max_low_order() RESULT(order)
+        order = max_low_order
+    END FUNCTION get_max_low_order
+
+    INTEGER FUNCTION get_max_high_order() RESULT(order)
+        order = max_high_order
+    END FUNCTION get_max_high_order
 
     SUBROUTINE cleanup_energy_calc()
         IMPLICIT NONE

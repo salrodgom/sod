@@ -239,6 +239,7 @@ contains
     integer, allocatable :: best_deg(:)
     real(dp), allocatable :: best_low(:), best_high(:)
     real(dp), allocatable :: unique_energy(:), unique_low(:), unique_high(:)
+    real(dp), allocatable :: unique_contrib(:,:)
     real(dp) :: degeneracy_energy_sum, degeneracy_mean_energy
     real(dp) :: boltzmann_weight_sum, boltzmann_energy_sum, boltzmann_energy_sq_sum
     real(dp) :: boltzmann_mean_energy, boltzmann_variance_energy
@@ -360,14 +361,16 @@ contains
         best_energy = huge(1.0_dp)
 
         unique_capacity = max(8, level)
-        allocate(unique_subsets(level, unique_capacity))
-        allocate(unique_energy(unique_capacity))
-        allocate(unique_low(unique_capacity))
-        allocate(unique_high(unique_capacity))
-        allocate(unique_deg(unique_capacity))
+    allocate(unique_subsets(level, unique_capacity))
+    allocate(unique_energy(unique_capacity))
+    allocate(unique_low(unique_capacity))
+    allocate(unique_high(unique_capacity))
+    allocate(unique_deg(unique_capacity))
+    allocate(unique_contrib(4, unique_capacity))
     unique_energy = sentinel_energy
     unique_low = sentinel_energy
     unique_high = sentinel_energy
+    unique_contrib = 0.0_dp
         unique_deg = 0
         unique_count = 0
         config = 1
@@ -379,12 +382,13 @@ contains
                 unique_deg(subset_idx) = unique_deg(subset_idx) + 1
             else
                 unique_count = unique_count + 1
-                call ensure_unique_capacity(level, unique_subsets, unique_energy, unique_low, unique_high, unique_deg, unique_capacity, unique_count)
+                call ensure_unique_capacity(level, unique_subsets, unique_energy, unique_low, unique_high, unique_deg, unique_contrib, unique_capacity, unique_count)
                 unique_subsets(1:level, unique_count) = canonical_subset(1:level)
                 unique_energy(unique_count) = sentinel_energy
                 unique_low(unique_count) = sentinel_energy
                 unique_high(unique_count) = sentinel_energy
                 unique_deg(unique_count) = 1
+                unique_contrib(:, unique_count) = 0.0_dp
             end if
 
             if (.not. next_combination(subset, total_sites)) exit
@@ -393,16 +397,32 @@ contains
         write(*,'(A,I0)') 'Configuraciones unicas evaluadas: ', unique_count
         call flush(output_unit)
 
+        do idx = 1, unique_count
+            if (unique_energy(idx) == sentinel_energy) then
+                config = 1
+                config(unique_subsets(1:level, idx)) = 2
+                call calculate_structure_energy(config, total_sites, energy, energy_low_side=low_estimate, &
+                     energy_high_side=high_estimate, low_contrib=unique_contrib(:, idx))
+                unique_energy(idx) = energy
+                unique_low(idx) = low_estimate
+                unique_high(idx) = high_estimate
+            end if
+        end do
+
+        if (level > get_max_low_order()) then
+            call calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_contrib, unique_deg, unique_energy, unique_low, config)
+        end if
+
         degeneracy_energy_sum = 0.0_dp
         weighted_low_sum = 0.0_dp
         weighted_high_sum = 0.0_dp
         boltzmann_weight_sum = 0.0_dp
-    boltzmann_energy_sum = 0.0_dp
-    boltzmann_energy_sq_sum = 0.0_dp
-    boltzmann_low_weight_sum = 0.0_dp
-    boltzmann_high_weight_sum = 0.0_dp
-    boltzmann_low_energy_sum = 0.0_dp
-    boltzmann_high_energy_sum = 0.0_dp
+        boltzmann_energy_sum = 0.0_dp
+        boltzmann_energy_sq_sum = 0.0_dp
+        boltzmann_low_weight_sum = 0.0_dp
+        boltzmann_high_weight_sum = 0.0_dp
+        boltzmann_low_energy_sum = 0.0_dp
+        boltzmann_high_energy_sum = 0.0_dp
         total_degeneracy_weight = 0
         total_low_weight = 0
         total_high_weight = 0
@@ -410,14 +430,6 @@ contains
         min_high_energy = huge_marker
         lowest_energy_in_level = huge_marker
         do idx = 1, unique_count
-            if (unique_energy(idx) == sentinel_energy) then
-                config = 1
-                config(unique_subsets(1:level, idx)) = 2
-                call calculate_structure_energy(config, total_sites, energy, low_estimate, high_estimate)
-                unique_energy(idx) = energy
-                unique_low(idx) = low_estimate
-                unique_high(idx) = high_estimate
-            end if
             total_degeneracy_weight = total_degeneracy_weight + unique_deg(idx)
             degeneracy_weight = real(unique_deg(idx), dp)
             degeneracy_energy_sum = degeneracy_energy_sum + degeneracy_weight * unique_energy(idx)
@@ -548,6 +560,7 @@ contains
     deallocate(unique_low)
     deallocate(unique_high)
     deallocate(unique_deg)
+    deallocate(unique_contrib)
     deallocate(best_subsets)
     deallocate(best_low)
     deallocate(best_high)
@@ -732,16 +745,18 @@ contains
         capacity = new_capacity
     end subroutine ensure_capacity
 
-    subroutine ensure_unique_capacity(level, unique_subsets, unique_energy, unique_low, unique_high, unique_deg, capacity, required)
+    subroutine ensure_unique_capacity(level, unique_subsets, unique_energy, unique_low, unique_high, unique_deg, unique_contrib, capacity, required)
         integer, intent(in) :: level, required
         integer, intent(inout) :: capacity
         integer, allocatable, intent(inout) :: unique_subsets(:,:)
         real(dp), allocatable, intent(inout) :: unique_energy(:), unique_low(:), unique_high(:)
         integer, allocatable, intent(inout) :: unique_deg(:)
+        real(dp), allocatable, intent(inout) :: unique_contrib(:,:)
         integer :: old_capacity, new_capacity
         integer, allocatable :: tmp_subsets(:,:)
         real(dp), allocatable :: tmp_real(:)
         integer, allocatable :: tmp_int(:)
+        real(dp), allocatable :: tmp_contrib(:,:)
 
         if (required <= capacity) return
         old_capacity = capacity
@@ -772,8 +787,399 @@ contains
         if (allocated(unique_deg)) deallocate(unique_deg)
         call move_alloc(tmp_int, unique_deg)
 
+        allocate(tmp_contrib(ubound(unique_contrib,1), new_capacity))
+        if (old_capacity > 0) tmp_contrib(:,1:old_capacity) = unique_contrib(:,1:old_capacity)
+        if (allocated(unique_contrib)) deallocate(unique_contrib)
+        call move_alloc(tmp_contrib, unique_contrib)
+
         capacity = new_capacity
     end subroutine ensure_unique_capacity
+
+    logical function find_scripts_directory(out_dir)
+        character(len=*), intent(out) :: out_dir
+    character(len=512) :: env_dir
+    integer :: lenv, i
+    character(len=512), dimension(6) :: candidates
+
+        out_dir = ''
+        env_dir = ''
+        lenv = 0
+        call get_environment_variable('SOD_SCRIPTS', env_dir, length=lenv)
+        if (lenv > 0) then
+            env_dir = env_dir(1:lenv)
+            if (directory_has_scripts(trim(env_dir))) then
+                out_dir = trim(env_dir)
+                find_scripts_directory = .true.
+                return
+            end if
+        end if
+
+    candidates = ''
+    candidates(1) = 'scripts'
+    candidates(2) = '../scripts'
+    candidates(3) = '../../scripts'
+    candidates(4) = '../../../scripts'
+    candidates(5) = '../../../../scripts'
+    candidates(6) = '/home/salvador/coding/sod/sod/scripts'
+        do i = 1, size(candidates)
+            if (directory_has_scripts(trim(candidates(i)))) then
+                out_dir = trim(candidates(i))
+                find_scripts_directory = .true.
+                return
+            end if
+        end do
+        find_scripts_directory = .false.
+    end function find_scripts_directory
+
+    logical function directory_has_scripts(dir)
+        character(len=*), intent(in) :: dir
+        logical :: exist_vasp, exist_run, exist_extract
+
+        inquire(file=trim(dir)//'/vasp2gin.sh', exist=exist_vasp)
+        inquire(file=trim(dir)//'/run_jobs.sh', exist=exist_run)
+        inquire(file=trim(dir)//'/extract.sh', exist=exist_extract)
+        directory_has_scripts = exist_vasp .AND. exist_run .AND. exist_extract
+    end function directory_has_scripts
+
+    subroutine select_calibration_indices(values, n, indices, ok)
+        real(dp), intent(in) :: values(:)
+        integer, intent(in) :: n
+        integer, intent(out) :: indices(:)
+        logical, intent(out) :: ok
+        integer, allocatable :: sorted_idx(:)
+        integer :: s, m, pick
+        real(dp) :: position
+
+        if (n < size(indices)) then
+            ok = .false.
+            return
+        end if
+
+        allocate(sorted_idx(n))
+        call sort_indices_by_values(values, sorted_idx, n)
+
+        m = size(indices)
+        do s = 1, m
+            position = 1.0_dp + floor(real(n - 1, dp) * real(s - 1, dp) / real(m - 1, dp))
+            pick = int(position)
+            pick = max(1, min(n, pick))
+            indices(s) = sorted_idx(pick)
+        end do
+
+        deallocate(sorted_idx)
+        ok = .true.
+    end subroutine select_calibration_indices
+
+    subroutine sort_indices_by_values(values, indices, n)
+        real(dp), intent(in) :: values(:)
+        integer, intent(out) :: indices(:)
+        integer, intent(in) :: n
+        integer :: i, j, tmp
+
+        do i = 1, n
+            indices(i) = i
+        end do
+
+        do i = 1, n - 1
+            do j = i + 1, n
+                if (values(indices(j)) < values(indices(i))) then
+                    tmp = indices(i)
+                    indices(i) = indices(j)
+                    indices(j) = tmp
+                end if
+            end do
+        end do
+    end subroutine sort_indices_by_values
+
+    subroutine copy_calibration_scripts(script_dir, calib_dir)
+        character(len=*), intent(in) :: script_dir
+        character(len=*), intent(in) :: calib_dir
+        integer :: exit_code
+
+        call execute_command_line('cp ' // trim(script_dir)//'/vasp2gin.sh ' // trim(calib_dir), exitstat=exit_code)
+        call execute_command_line('cp ' // trim(script_dir)//'/run_jobs.sh ' // trim(calib_dir), exitstat=exit_code)
+        call execute_command_line('cp ' // trim(script_dir)//'/extract.sh ' // trim(calib_dir), exitstat=exit_code)
+        call execute_command_line('chmod +x ' // trim(calib_dir)//'/vasp2gin.sh ' // trim(calib_dir)//'/run_jobs.sh ' // trim(calib_dir)//'/extract.sh', exitstat=exit_code)
+    end subroutine copy_calibration_scripts
+
+    subroutine solve_normal_equations(mat, rhs, coeff, ok)
+        real(dp), intent(inout) :: mat(:,:)
+        real(dp), intent(in) :: rhs(:)
+        real(dp), intent(out) :: coeff(:)
+        logical, intent(out) :: ok
+        real(dp) :: aug(4,5)
+        real(dp) :: pivot, factor
+        integer :: i, j, k, pivot_row
+        integer, parameter :: n = 4
+        real(dp) :: temp_row(5)
+
+        aug = 0.0_dp
+        do i = 1, n
+            aug(i,1:n) = mat(i,1:n)
+            aug(i,n+1) = rhs(i)
+        end do
+
+        do k = 1, n
+            pivot_row = k
+            pivot = abs(aug(k,k))
+            do i = k+1, n
+                if (abs(aug(i,k)) > pivot) then
+                    pivot = abs(aug(i,k))
+                    pivot_row = i
+                end if
+            end do
+
+            if (pivot < 1.0e-10_dp) then
+                ok = .false.
+                return
+            end if
+
+            if (pivot_row /= k) then
+                temp_row = aug(k,:)
+                aug(k,:) = aug(pivot_row,:)
+                aug(pivot_row,:) = temp_row
+            end if
+
+            pivot = aug(k,k)
+            aug(k,:) = aug(k,:) / pivot
+
+            do i = 1, n
+                if (i == k) cycle
+                factor = aug(i,k)
+                aug(i,:) = aug(i,:) - factor * aug(k,:)
+            end do
+        end do
+
+        do i = 1, n
+            coeff(i) = aug(i,n+1)
+        end do
+        ok = .true.
+    end subroutine solve_normal_equations
+
+    subroutine calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_contrib, unique_deg, unique_energy, unique_low, config)
+        integer, intent(in) :: level, total_sites, unique_count
+        integer, intent(in) :: unique_subsets(:,:)
+        integer, intent(in) :: unique_deg(:)
+        real(dp), intent(in) :: unique_contrib(:,:)
+        real(dp), intent(inout) :: unique_energy(:)
+        real(dp), intent(inout) :: unique_low(:)
+        integer, intent(inout) :: config(:)
+
+    integer, parameter :: n_orders = 4
+    integer, parameter :: n_targets = n_orders + 1
+        character(len=256) :: calib_dir, script_dir
+        character(len=64) :: base_name
+        character(len=16) :: level_tag
+        integer :: selected_idx(n_targets)
+        real(dp) :: contrib_sel(n_orders, n_targets)
+        real(dp) :: energy_sel(n_targets)
+        character(len=128) :: gout_names(n_targets)
+    integer :: i, j, k, ios, unit_file, exit_code
+        logical :: ok_scripts, ok_selection, ok_system
+        real(dp) :: base_energy
+        real(dp) :: mat(n_orders, n_orders)
+        real(dp) :: rhs(n_orders)
+        real(dp) :: coeff(n_orders)
+        character(len=512) :: command
+        character(len=512) :: line
+        character(len=256) :: gout_label
+        integer :: pos_hash, match_idx
+        real(dp) :: energy_val
+        real(dp) :: corrected
+        logical :: filled(n_targets)
+        integer :: best_idx
+
+        if (unique_count < n_targets) return
+
+        ok_scripts = find_scripts_directory(script_dir)
+        if (.not. ok_scripts) then
+            write(*,'(A,I0)') 'Aviso: no se encontro directorio de scripts GULP para el nivel ', level
+            return
+        end if
+
+        call select_calibration_indices(unique_energy, unique_count, selected_idx, ok_selection)
+        if (.not. ok_selection) return
+
+        write(level_tag,'(I4.4)') level
+        write(calib_dir,'("gulp_calib_N",A)') adjustl(level_tag)
+        calib_dir = trim(calib_dir)
+
+        call execute_command_line('rm -rf ' // trim(calib_dir), exitstat=exit_code)
+        call execute_command_line('mkdir -p ' // trim(calib_dir), exitstat=exit_code)
+
+        base_energy = get_base_energy()
+
+        do i = 1, n_targets
+            contrib_sel(:, i) = unique_contrib(:, selected_idx(i))
+            config = 1
+            config(unique_subsets(1:level, selected_idx(i))) = 2
+            write(base_name,'("calib_N",I4.4,"_c",I2.2)') level, i
+            call write_vasp_file(config, total_sites, trim(calib_dir)//'/'//trim(base_name)//'.vasp')
+            gout_names(i) = trim(base_name)//'.vasp.gout'
+        end do
+
+        call copy_calibration_scripts(script_dir, calib_dir)
+
+        command = 'cd ' // trim(calib_dir) // ' && bash run_jobs.sh'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        if (exit_code /= 0) then
+            write(*,'(A,I0)') 'Aviso: fallo run_jobs.sh durante calibracion en nivel ', level
+            return
+        end if
+
+        command = 'cd ' // trim(calib_dir) // ' && bash extract.sh'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        if (exit_code /= 0) then
+            write(*,'(A,I0)') 'Aviso: fallo extract.sh durante calibracion en nivel ', level
+            return
+        end if
+
+        open(newunit=unit_file, file=trim(calib_dir)//'/ENERGIES', status='old', action='read', iostat=ios)
+        if (ios /= 0) then
+            write(*,'(A,I0)') 'Aviso: no se pudo leer ENERGIES para el nivel ', level
+            return
+        end if
+
+        energy_sel = 0.0_dp
+        filled = .false.
+        do
+            read(unit_file,'(A)',iostat=ios) line
+            if (ios /= 0) exit
+            if (len_trim(line) == 0) cycle
+            pos_hash = index(line, '#')
+            if (pos_hash <= 0) cycle
+            read(line(1:pos_hash-1),*,iostat=ios) energy_val
+            if (ios /= 0) cycle
+            gout_label = adjustl(trim(line(pos_hash+1:)))
+            gout_label = trim(gout_label)
+            match_idx = 0
+            do i = 1, n_targets
+                if (trim(gout_label) == trim(gout_names(i))) then
+                    match_idx = i
+                    exit
+                end if
+            end do
+            if (match_idx > 0) then
+                energy_sel(match_idx) = energy_val
+                filled(match_idx) = .true.
+            end if
+        end do
+        close(unit_file)
+
+        if (.not. all(filled)) then
+            write(*,'(A,I0)') 'Aviso: energias incompletas en calibracion del nivel ', level
+            return
+        end if
+
+        mat = 0.0_dp
+        rhs = 0.0_dp
+        do i = 1, n_targets
+            do j = 1, n_orders
+                rhs(j) = rhs(j) + contrib_sel(j,i) * (energy_sel(i) - base_energy)
+                do k = 1, n_orders
+                    mat(j,k) = mat(j,k) + contrib_sel(j,i) * contrib_sel(k,i)
+                end do
+            end do
+        end do
+
+        call solve_normal_equations(mat, rhs, coeff, ok_system)
+        if (.not. ok_system) then
+            write(*,'(A,I0)') 'Aviso: sistema singular en calibracion del nivel ', level
+            return
+        end if
+
+        do i = 1, unique_count
+            corrected = base_energy + sum(coeff(:) * unique_contrib(:, i))
+            unique_energy(i) = corrected
+            unique_low(i) = corrected
+        end do
+
+        do i = 1, n_targets
+            unique_energy(selected_idx(i)) = energy_sel(i)
+            unique_low(selected_idx(i)) = energy_sel(i)
+        end do
+
+        best_idx = 1
+        do i = 2, unique_count
+            if (unique_energy(i) < unique_energy(best_idx)) best_idx = i
+        end do
+
+        if (.not. any(selected_idx == best_idx)) then
+            call measure_best_configuration(level, total_sites, unique_subsets(1:level, best_idx), config, calib_dir, best_idx, unique_energy, unique_low)
+        end if
+    end subroutine calibrate_level_with_gulp
+
+    subroutine measure_best_configuration(level, total_sites, subset, config, calib_dir, idx_target, unique_energy, unique_low)
+        integer, intent(in) :: level, total_sites, idx_target
+        integer, intent(in) :: subset(:)
+        integer, intent(inout) :: config(:)
+        character(len=*), intent(in) :: calib_dir
+        real(dp), intent(inout) :: unique_energy(:)
+        real(dp), intent(inout) :: unique_low(:)
+
+        character(len=64) :: filename_base
+        character(len=512) :: command
+        character(len=512) :: line
+        character(len=256) :: gout_label
+        integer :: exit_code, unit_file, ios, pos_hash
+        real(dp) :: energy_val
+        character(len=16) :: level_tag
+
+        write(level_tag,'(I4.4)') level
+        write(filename_base,'("calib_N",A,"_best")') trim(level_tag)
+
+        config = 1
+        if (level > 0) config(subset(1:level)) = 2
+        call write_vasp_file(config, total_sites, trim(calib_dir)//'/'//trim(filename_base)//'.vasp')
+
+        command = 'cd ' // trim(calib_dir) // ' && bash vasp2gin.sh ' // trim(filename_base)//'.vasp'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        if (exit_code /= 0) then
+            write(*,'(A,I0)') 'Aviso: fallo vasp2gin.sh al medir configuracion minima en nivel ', level
+            return
+        end if
+
+        command = 'cd ' // trim(calib_dir) // ' && gulp < ' // trim(filename_base)//'.vasp.gin > ' // trim(filename_base)//'.vasp.gout'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        if (exit_code /= 0) then
+            write(*,'(A,I0)') 'Aviso: fallo GULP al medir configuracion minima en nivel ', level
+            return
+        end if
+
+        command = 'cd ' // trim(calib_dir) // ' && bash extract.sh'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        if (exit_code /= 0) then
+            write(*,'(A,I0)') 'Aviso: extract.sh fallo tras medir configuracion minima en nivel ', level
+            return
+        end if
+
+        open(newunit=unit_file, file=trim(calib_dir)//'/ENERGIES', status='old', action='read', iostat=ios)
+        if (ios /= 0) then
+            write(*,'(A,I0)') 'Aviso: no se pudo reabrir ENERGIES tras medir minimo en nivel ', level
+            return
+        end if
+
+        do
+            read(unit_file,'(A)', iostat=ios) line
+            if (ios /= 0) exit
+            if (len_trim(line) == 0) cycle
+            pos_hash = index(line, '#')
+            if (pos_hash <= 0) cycle
+            gout_label = adjustl(trim(line(pos_hash+1:)))
+            gout_label = trim(gout_label)
+            if (trim(gout_label) == trim(filename_base)//'.vasp.gout') then
+                read(line(1:pos_hash-1), *, iostat=ios) energy_val
+                if (ios == 0) then
+                    unique_energy(idx_target) = energy_val
+                    unique_low(idx_target) = energy_val
+                end if
+                exit
+            end if
+        end do
+        close(unit_file)
+
+        config = 1
+    end subroutine measure_best_configuration
 
     subroutine canonicalize_subset(subset, level, eqmatrix, nop, canonical)
         integer, intent(in) :: subset(:)
