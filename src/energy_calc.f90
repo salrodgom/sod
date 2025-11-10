@@ -13,7 +13,7 @@
 MODULE energy_calc
     IMPLICIT NONE
     PRIVATE
-    PUBLIC :: calculate_structure_energy, init_energy_calc, cleanup_energy_calc, write_vasp_file, write_eqmatrix_file, get_eqmatrix, get_base_energy, get_max_low_order, get_max_high_order
+    PUBLIC :: calculate_structure_energy, init_energy_calc, cleanup_energy_calc, write_vasp_file, write_eqmatrix_file, get_eqmatrix, get_base_energy, get_high_base_energy, get_max_low_order, get_max_high_order
 
     ! Parameters from spbesod
     INTEGER, PARAMETER :: dp = KIND(1.0D0)
@@ -1719,6 +1719,11 @@ MODULE energy_calc
         REAL(dp) :: base_energy
         base_energy = E0
     END FUNCTION get_base_energy
+
+    FUNCTION get_high_base_energy() RESULT(base_energy)
+        REAL(dp) :: base_energy
+        base_energy = E0_high
+    END FUNCTION get_high_base_energy
 
     INTEGER FUNCTION get_max_low_order() RESULT(order)
         order = max_low_order

@@ -1,7 +1,27 @@
 #!/bin/bash
 
-function raspa_input_file {
- echo "#number of pseudo atoms
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+	echo "Uso: $0 fichero.vasp" >&2
+	exit 1
+fi
+
+file="$1"
+
+if [ ! -f "$file" ]; then
+	echo "Error: no existe el fichero $file" >&2
+	exit 1
+fi
+
+ase_candidates=(
+	"/home/salvador/miniforge3/bin/ase"
+	"/home/salvador/.local/bin/ase"
+)
+
+raspa_input_file() {
+	cat >pseudo_atoms.def <<'EOF'
+#number of pseudo atoms
 5
 #type      print   as    chem  oxidation   mass        charge   polarization B-factor radii  connectivity anisotropic anisotropic-type   tinker-type
 O1         yes     O1     O    0           15.9994     0.0      0.0          1.0      0.5    2            0           absolute           0
@@ -9,12 +29,14 @@ O2         yes     O2     O    0           15.9994     0.0      0.0          1.0
 O3         yes     O3     O    0           15.9994     0.0      0.0          1.0      0.5    2            0           absolute           0
 Si         yes     Si    Si    0           28.0855     0.0      0.0          1.0      1.18   4            0           absolute           0
 Ge         yes     Ge    Ge    0           26.981539   0.0      0.0          1.0      1.18   4            0           absolute           0
-" > pseudo_atoms.def 
-echo "SimulationType                MC
+EOF
+
+	cat >simulation.input <<'EOF'
+SimulationType                MC
 NumberOfCycles                0
 NumberOfInitializationCycles  0
 PrintEvery                    10
-     
+
 Forcefield                    Local
 
 RemoveAtomNumberCodeFromLabel yes
@@ -23,44 +45,33 @@ ModifyFrameworkAtomConnectedTo O O2 Si
 ModifyFrameworkAtomConnectedTo O O1 Ge
 ModifyFrameworkAtomConnectedTo O2 O1 Ge
 ModifyFrameworkAtomConnectedTo O1 O3 Si
-     
+
 Framework 0
 FrameworkName Local
 UnitCells 1 1 1
 ExternalTemperature 300.0
-" > simulation.input
+EOF
 }
 
-file=$1
-
-# VASP 2 CIF
-if [ -f Local.cif ] ; then rm -rf Local.cif ; fi
-raspa_input_file
-
-function run_ase_convert {
+run_ase_convert() {
 	local src="$1"
 	local dst="$2"
-	local ase_bin
+	local candidate
 
-	if [ -x /home/salvador/miniforge3/bin/ase ] ; then
-		/home/salvador/miniforge3/bin/ase convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
-	fi
-
-	if [ -x /home/salvador/.local/bin/ase ] ; then
-		/home/salvador/.local/bin/ase convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
-	fi
-
-	if command -v ase >/dev/null 2>&1 ; then
-		ase_bin=$(command -v ase)
-		if [ -n "$ase_bin" ] ; then
-			"$ase_bin" convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
+	for candidate in "${ase_candidates[@]}"; do
+		if [ -x "$candidate" ]; then
+			"$candidate" convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
 		fi
+	done
+
+	if command -v ase >/dev/null 2>&1; then
+		candidate=$(command -v ase)
+		"$candidate" convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
 	fi
 
-	for pycmd in python3 python ; do
-		if command -v "$pycmd" >/dev/null 2>&1 ; then
-			"$pycmd" -c "import ase" >/dev/null 2>&1 || continue
-			"$pycmd" -m ase.cli.main convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
+	for candidate in python3 python; do
+		if command -v "$candidate" >/dev/null 2>&1; then
+			"$candidate" -m ase.cli.main convert -i vasp -o cif "$src" "$dst" && [ -f "$dst" ] && return 0
 		fi
 	done
 
@@ -68,22 +79,83 @@ function run_ase_convert {
 	return 1
 }
 
-run_ase_convert "$file" Local.cif || exit 1
-sed -i -e 's/_space_group_IT_number/_symmetry_Int_Tables_number/g' -e '/space_group_name_H-M_alt/d' Local.cif 
-simulate 
-cp Movies/System_0/Framework_0_final_1_1_1_P1.cif ${file}.cif
-rm -rf Local.cif VTK Restart Output Movies pseudo_atoms.def pseudo_atoms.def simulation.input
+run_raspa_convert() {
+	local structure="$1"
+	local dir
+	local base
+	local log_file
+	local output_cif
 
-# CIF 2 GIN
-echo "opti conp prop
+	if ! command -v simulate >/dev/null 2>&1; then
+		echo "Error: no se encontró el binario simulate en PATH" >&2
+		return 1
+	fi
+
+	dir=$(dirname "$structure")
+	base=$(basename "$structure")
+	log_file="$dir/${base}.simulate.log"
+	output_cif="Movies/System_0/Framework_0_final_1_1_1_P1.cif"
+
+	echo "Calculando la energía de ${structure} con simulate..."
+	if ! simulate >"$log_file" 2>&1; then
+		echo "Error: simulate falló para ${structure}. Revisa $log_file" >&2
+		return 1
+	fi
+
+	if [ ! -f "$output_cif" ]; then
+		echo "Error: simulate no generó $output_cif" >&2
+		return 1
+	fi
+
+	cp "$output_cif" "${structure}.cif"
+	rm -f "$log_file"
+	rm -f Local.cif pseudo_atoms.def simulation.input
+	rm -rf Movies Restart Output VTK
+	return 0
+}
+
+raspa_input_file
+rm -f Local.cif
+run_ase_convert "$file" Local.cif
+sed -i -e 's/_space_group_IT_number/_symmetry_Int_Tables_number/g' -e '/space_group_name_H-M_alt/d' Local.cif
+run_raspa_convert "$file"
+
+cif_path="${file}.cif"
+
+if [ ! -f "$cif_path" ]; then
+	echo "Error: no se encontró el CIF generado $cif_path" >&2
+	exit 1
+fi
+
+read -r cell1 cell2 cell3 cell4 cell5 cell6 <<<"$(awk '
+	/_cell_length_a/ {a=$2}
+	/_cell_length_b/ {b=$2}
+	/_cell_length_c/ {c=$2}
+	/_cell_angle_alpha/ {al=$2}
+	/_cell_angle_beta/ {be=$2}
+	/_cell_angle_gamma/ {ga=$2}
+	END {print a, b, c, al, be, ga}
+' "$cif_path")"
+
+if [ -z "$cell1" ]; then
+	echo "Error: no se pudieron extraer los parámetros de celda de $cif_path" >&2
+	exit 1
+fi
+
+gin_path="${file}.gin"
+
+cat >"$gin_path" <<EOF
+opti conp prop
 name $file
-cell" > $file.gin
-cell1=$(grep '_cell_length_a' $file.cif | awk '{print $2}'); cell2=$(grep '_cell_length_b' $file.cif | awk '{print $2}'); cell3=$(grep '_cell_length_c' $file.cif | awk '{print $2}');
-cell4=$(grep '_cell_angle_alpha' $file.cif | awk '{print $2}'); cell5=$(grep '_cell_angle_beta' $file.cif | awk '{print $2}'); cell6=$(grep '_cell_angle_gamma' $file.cif | awk '{print $2}')
-echo " $cell1 $cell2 $cell3 $cell4 $cell5 $cell6
-frac " >> $file.gin
-sed -n '/^_atom_site_charge$/,$P' $file.cif | sed '/_atom_site_charge'/d | sed '/^[[:space:]]*$/d' | awk '{print $1 " core",$3,$4,$5}' >> $file.gin
-echo "
+cell
+ $cell1 $cell2 $cell3 $cell4 $cell5 $cell6
+frac
+EOF
+
+sed -n '/^_atom_site_charge$/,$p' "$cif_path" | sed '/_atom_site_charge/d' | sed '/^[[:space:]]*$/d' | awk '{print $1 " core",$3,$4,$5}' >>"$gin_path"
+
+cat >>"$gin_path" <<EOF
+
 space
 P 1
 
@@ -101,8 +173,11 @@ library Germanate
 switch_minimiser rfo gnorm 0.05
 stepmx opt 0.1
 dump every 1 $file.grs
-output cif $file.cif" >> $file.gin
-echo "# O1: Ge-O1-Ge
+output cif $file.cif
+EOF
+
+cat >Germanate.lib <<'EOF'
+# O1: Ge-O1-Ge
 # O2: Si-O2-Si
 # O3: Si-O3-Ge
 species
@@ -144,5 +219,6 @@ three
 Si core O1 shel O1 shel 1.2614 109.47 1.9 1.9 3.5
 Si core O1 shel O2 shel 1.2614 109.47 1.9 1.9 3.5
 Si core O2 shel O2 shel 1.2614 109.47 1.9 1.9 3.5
-" > Germanate.lib
+EOF
+
 exit 0

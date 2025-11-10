@@ -1,0 +1,8 @@
+#!/usr/bin/gnuplot
+nGeO2 = -121.812200998519
+nSiO2 = -128.799143746482
+N = 24.0
+set yrange [-10:40]
+set xrange [0:1]
+p '< sort -gk1 sod_boltzmann_exact.txt' u ($1/N):(96.48533212331*($6-$1*nGeO2-(N-$1)*nSiO2)/N):(3*$8*96.48533212331/N) w yerrorbars pt 7 ps 1 lc rgb 'red' notitle,\
+  '' u ($1/N):(96.48533212331*($7-$1*nGeO2-(N-$1)*nSiO2)/N):(3*$9*96.48533212331/N) w yerrorbars pt 7 lc rgb 'blue' notitle
