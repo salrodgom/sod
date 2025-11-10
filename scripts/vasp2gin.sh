@@ -1,24 +1,26 @@
 #!/bin/bash
+# Converts a POSCAR-like VASP file into the GULP input bundle required by SOD/GULP calibrations.
 
 set -euo pipefail
 
+# Validate inputs and capture the path to the structure that must be converted.
 if [ $# -ne 1 ]; then
 	echo "Uso: $0 fichero.vasp" >&2
 	exit 1
 fi
-
 file="$1"
-
 if [ ! -f "$file" ]; then
 	echo "Error: no existe el fichero $file" >&2
 	exit 1
 fi
 
+# Candidate ASE executables searched in order before falling back to PATH lookups.
 ase_candidates=(
 	"/home/salvador/miniforge3/bin/ase"
 	"/home/salvador/.local/bin/ase"
 )
 
+# Write the minimal RASPA input files used to translate the CIF back into a relaxed structure.
 raspa_input_file() {
 	cat >pseudo_atoms.def <<'EOF'
 #number of pseudo atoms
@@ -53,6 +55,7 @@ ExternalTemperature 300.0
 EOF
 }
 
+# Try a series of ASE entry points until one succeeds at producing a CIF snapshot of the VASP file.
 run_ase_convert() {
 	local src="$1"
 	local dst="$2"
@@ -79,6 +82,7 @@ run_ase_convert() {
 	return 1
 }
 
+# Run RASPA's "simulate" binary to relax the CIF and emit a final structure compatible with GULP.
 run_raspa_convert() {
 	local structure="$1"
 	local dir
@@ -114,6 +118,7 @@ run_raspa_convert() {
 	return 0
 }
 
+# Main conversion pipeline: build auxiliary input, call ASE/RASPA, and emit the final *.gin package.
 raspa_input_file
 rm -f Local.cif
 run_ase_convert "$file" Local.cif
@@ -177,6 +182,7 @@ output cif $file.cif
 EOF
 
 cat >Germanate.lib <<'EOF'
+# Force-field description tailored to the Si/Ge germanate framework used during calibration.
 # O1: Ge-O1-Ge
 # O2: Si-O2-Si
 # O3: Si-O3-Ge

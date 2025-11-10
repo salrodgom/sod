@@ -1066,12 +1066,16 @@ MODULE energy_calc
             IF (io_stat /= 0) EXIT
             IF (TRIM(line) == '') CYCLE
             IF (line(1:1) == '#') CYCLE
-            omega_tmp = 0
+            IF (INDEX(line,'substitutions') /= 0) CYCLE
+            IF (INDEX(line,'configuration') /= 0) CYCLE
+            BACKSPACE(25)
             ge_positions = 0
-            READ(line,*,IOSTAT=io_stat) aux, omega_tmp, (ge_positions(j), j=1, ge_count)
-            IF (io_stat /= 0) CYCLE
+            omega_tmp = 0
+            READ(25,*,IOSTAT=io_stat) aux, omega_tmp, (ge_positions(j), j=1, ge_count)
+            IF (io_stat /= 0) EXIT
             IF (omega_tmp <= 0) omega_tmp = 1
             m = m + 1
+            hole_conf(m, :) = 0
             is_ge = .FALSE.
             DO j = 1, ge_count
                 IF (ge_positions(j) >= 1 .AND. ge_positions(j) <= npos) THEN
