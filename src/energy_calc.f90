@@ -941,7 +941,7 @@ MODULE energy_calc
         ', dE3_triples=', n_dE3, ', dE4_quads=', n_dE4
     WRITE(*,'(A,I0)') 'init_energy_calc: low-side max order = ', max_low_order
     IF (high_base_loaded) THEN
-        WRITE(*,'(A,F12.6,A,I0,A,I0,A,I0)') 'init_energy_calc: high-side E0 = ', E0_high, &
+        WRITE(*,'(A,F16.6,A,I0,A,I0,A,I0)') 'init_energy_calc: high-side E0 = ', E0_high, &
             ', max hole order = ', max_high_order, ', hole triples=', n_h_dE3, &
             ', hole quads=', n_h_dE4
     ELSE

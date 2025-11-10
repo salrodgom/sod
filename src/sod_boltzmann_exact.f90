@@ -283,7 +283,7 @@ contains
         else
             max_entropy = 0.0_dp
         end if
-        write(*,'(A,F12.6)') 'Entropia máxima (k_B ln W) [eV/K]: ', max_entropy
+        write(*,'(A,F16.6)') 'Entropia máxima (k_B ln W) [eV/K]: ', max_entropy
 
         if (total_sites > 0) then
             x = real(level, dp) / real(total_sites, dp)
@@ -297,7 +297,7 @@ contains
         else
             ideal_entropy = 0.0_dp
         end if
-        write(*,'(A,F12.6)') 'Entropia ideal (mezcla binaria) [eV/K]: ', ideal_entropy
+        write(*,'(A,F16.6)') 'Entropia ideal (mezcla binaria) [eV/K]: ', ideal_entropy
         call flush(output_unit)
 
         hole_count = total_sites - level
@@ -743,10 +743,10 @@ contains
             return
         end if
 
-        write(*,'(A,F12.6)') '  Energía mínima (eV): ', best_energy
-        write(*,'(A,F12.6)') '  Energía media (eV): ', mean_energy
-        write(*,'(A,F12.6)') '  Varianza de la energía [eV^2]: ', variance_energy
-        write(*,'(A,F12.6)') '  Energía mínima usada para referencia (eV): ', min_energy
+        write(*,'(A,F16.6)') '  Energía mínima (eV): ', best_energy
+        write(*,'(A,F16.6)') '  Energía media (eV): ', mean_energy
+        write(*,'(A,F16.6)') '  Varianza de la energía [eV^2]: ', variance_energy
+        write(*,'(A,F16.6)') '  Energía mínima usada para referencia (eV): ', min_energy
 
         total_deg = 0
         do idx = 1, count
@@ -759,8 +759,8 @@ contains
         else
             entropy_min = 0.0_dp
         end if
-        write(*,'(A,F12.6)') '  Entropia de los mínimos (eV/K): ', entropy_min
-        write(*,'(A,F12.6)') '  Entropia total lado ('//trim(tag)//') (eV/K): ', entropy_side
+        write(*,'(A,F16.6)') '  Entropia de los mínimos (eV/K): ', entropy_min
+        write(*,'(A,F16.6)') '  Entropia total lado ('//trim(tag)//') (eV/K): ', entropy_side
         call flush(output_unit)
 
         do idx = 1, count
@@ -787,7 +787,7 @@ contains
             write(*,'(A)') '    Configuración base sin sustituciones.'
         end if
         write(*,'(A,I0)') '    Degeneración (g): ', degeneracy
-        write(*,'(A,F12.6)') '    Energía corregida (eV): ', energy
+        write(*,'(A,F16.6)') '    Energía corregida (eV): ', energy
         call flush(output_unit)
     end subroutine emit_configuration_info_side
 
