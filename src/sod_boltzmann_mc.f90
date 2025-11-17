@@ -13,12 +13,15 @@
 program sod_boltzmann_mc
     use sod_boltzmann_consts
     use sod_boltzmann_utils
+    use sod_calibration
     use energy_calc
+    use, intrinsic :: iso_fortran_env, only: output_unit
     implicit none
 
     integer, parameter :: max_exact_combos = 200000
     integer, parameter :: mix_n = 6
     integer, parameter :: mix_m = 12
+    integer, parameter :: uniform_unique_cap = 1000
     real(dp), parameter :: mix_x0 = 0.5_dp
     real(dp), parameter :: mix_d0 = 0.01_dp
     real(dp), parameter :: conv_ev_to_kjmol = 96.48533212331_dp
@@ -35,6 +38,9 @@ program sod_boltzmann_mc
     logical :: use_parallel
     logical :: omp_available
     logical :: force_restart_accept
+    logical :: force_mc_sampling
+    integer :: level_min, level_max
+    integer :: level_start, level_end
 
     integer, allocatable :: eqmatrix(:,:), config(:), local_config(:)
     integer :: nop, total_sites
@@ -45,7 +51,7 @@ program sod_boltzmann_mc
 !$  use_parallel = .true.
 !$  omp_available = .true.
 
-    call parse_arguments(temperature, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available)
+    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling)
     call configure_random_seed(seed_value)
     call configure_restart_mode(force_restart_accept)
 
@@ -65,16 +71,29 @@ program sod_boltzmann_mc
         effective_max = min(max_substitutions, total_sites)
     end if
 
+    if (level_max < 0) then
+        level_start = max(0, level_min)
+        level_end = effective_max
+    else
+        level_start = max(0, min(level_min, total_sites))
+        level_end = min(level_max, total_sites)
+    end if
+
+    if (level_end > effective_max) level_end = effective_max
+    if (level_start > level_end) level_start = level_end
+
     write(*,'(A)') '--- Parámetros del cálculo ---'
     write(*,'(A,F10.2)') 'Temperatura (K): ', temperature
     write(*,'(A,I6)') 'Sitios sustituibles (npos): ', total_sites
     write(*,'(A,I6)') 'Max sustituciones evaluadas: ', effective_max
+    write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_start, ' .. ', level_end
     write(*,'(A,I8)') 'Umbral enumeración exacta: ', max_exact_combos
     write(*,'(A,I8)') 'Muestras aleatorias (si se supera el umbral): ', samples_per_level
     write(*,'(A)') 'Resultados por nivel guardados en: '//trim(summary_filename)
     write(*,'(A)') '                               y: '//trim(summary_txt_filename)
     write(*,'(A)') 'Método de muestreo MC (si aplica): '//trim(sampling_mode)
     write(*,'(A)') 'OpenMP paralelo: '//merge('Si','No',use_parallel)
+    write(*,'(A)') 'Forzar muestreo MC: '//merge('Si','No',force_mc_sampling)
     if (use_parallel) then
         write(*,'(A)') 'Nota: las salidas por nivel pueden imprimirse en orden no secuencial durante el cálculo paralelo.'
         write(*,'(A)') '      Los archivos de resumen se reordenan al finalizar para dejar los niveles crecientes.'
@@ -85,18 +104,18 @@ program sod_boltzmann_mc
 !$omp parallel default(shared) private(local_config)
         allocate(local_config(total_sites))
 !$omp do schedule(dynamic)
-        do level = 0, effective_max
+        do level = level_start, level_end
             call process_level(level, total_sites, local_config, temperature, samples_per_level, &
-                max_exact_combos, sampling_mode, use_parallel, summary_unit, summary_txt_unit)
+                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
         end do
 !$omp end do
         deallocate(local_config)
 !$omp end parallel
     else
         allocate(config(total_sites))
-        do level = 0, effective_max
+        do level = level_start, level_end
             call process_level(level, total_sites, config, temperature, samples_per_level, &
-                max_exact_combos, sampling_mode, use_parallel, summary_unit, summary_txt_unit)
+                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
         end do
         deallocate(config)
     end if
@@ -108,117 +127,232 @@ program sod_boltzmann_mc
 contains
 
     ! Parses optional command-line arguments and populates runtime parameters.
-    subroutine parse_arguments(temp, max_subs, samples_level, seed, sampler, use_parallel, omp_available)
+    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc)
         real(dp), intent(out) :: temp
-        integer, intent(out) :: max_subs, samples_level, seed
+        integer, intent(out) :: level_min, level_max, max_subs, samples_level, seed
         character(len=*), intent(out) :: sampler
         logical, intent(inout) :: use_parallel
         logical, intent(in) :: omp_available
-        integer :: argc, ios
-        character(len=256) :: carg
+        logical, intent(out) :: force_mc
+    integer :: argc, ios, i, j, colon_pos
+        character(len=256) :: carg, lowered, spec
+        character(len=256), allocatable :: args(:)
+        logical, allocatable :: skip(:)
+    logical :: found_range, handled
+    logical :: temp_set, max_subs_set, samples_set, seed_set, sampler_set, omp_set
 
         temp = 1000.0_dp
+        level_min = 0
+        level_max = -1
         max_subs = -1
         samples_level = 5000
         seed = -1
-    sampler = 'uniform'
+        sampler = 'uniform'
+        force_mc = .false.
 
         argc = command_argument_count()
-        if (argc >= 1) then
-            call get_command_argument(1, carg)
-            if (is_help_argument(carg)) then
+        if (argc <= 0) return
+
+        allocate(args(argc))
+        allocate(skip(argc))
+        skip = .false.
+
+        do i = 1, argc
+            call get_command_argument(i, args(i))
+            if (is_help_argument(args(i))) then
                 call print_usage(omp_available)
                 stop 0
             end if
-            read(carg,*,iostat=ios) temp
-            if (ios /= 0) then
-                write(error_unit,'(A)') 'Advertencia: argumento 1 inválido, se usa T=1000K'
-                temp = 1000.0_dp
+        end do
+
+        do i = 1, argc
+            lowered = adjustl(args(i))
+            do j = 1, len_trim(lowered)
+                if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
+            end do
+            if (trim(lowered) == '--force-mc' .or. trim(lowered) == '--force_mc' .or. &
+                trim(lowered) == 'force-mc' .or. trim(lowered) == 'forcemc') then
+                force_mc = .true.
+                skip(i) = .true.
             end if
-        end if
-        if (argc >= 2) then
-            call get_command_argument(2, carg)
-            if (is_help_argument(carg)) then
-                call print_usage(omp_available)
-                stop 0
-            end if
-            read(carg,*,iostat=ios) max_subs
-            if (ios /= 0) then
-                write(error_unit,'(A)') 'Advertencia: argumento 2 inválido, se evalúan todos los valores'
-                max_subs = -1
-            end if
-        end if
-        if (argc >= 3) then
-            call get_command_argument(3, carg)
-            if (is_help_argument(carg)) then
-                call print_usage(omp_available)
-                stop 0
-            end if
-            read(carg,*,iostat=ios) samples_level
-            if (ios /= 0 .or. samples_level <= 0) then
-                write(error_unit,'(A)') 'Advertencia: argumento 3 inválido, se usan 5000 muestras'
-                samples_level = 5000
-            end if
-        end if
-        if (argc >= 4) then
-            call get_command_argument(4, carg)
-            if (is_help_argument(carg)) then
-                call print_usage(omp_available)
-                stop 0
-            end if
-            read(carg,*,iostat=ios) seed
-            if (ios /= 0) seed = -1
-        end if
-        if (argc >= 5) then
-            call get_command_argument(5, sampler)
-            if (is_help_argument(sampler)) then
-                call print_usage(omp_available)
-                stop 0
-            end if
-            sampler = adjustl(sampler)
-            if (sampler /= 'uniform' .and. sampler /= 'metropolis') then
-                write(error_unit,'(A)') 'Advertencia: método MC desconocido, se usa "uniform"'
-                sampler = 'uniform'
-            end if
-        end if
-        if (argc >= 6) then
-            call get_command_argument(6, carg)
-            if (is_help_argument(carg)) then
-                call print_usage(omp_available)
-                stop 0
-            end if
-            carg = adjustl(carg)
-            select case (trim(carg))
-            case ('omp', 'OMP', 'O', '1', 'true', 'TRUE')
-                if (omp_available) then
-                    use_parallel = .true.
-                else
-                    write(error_unit,'(A)') 'Advertencia: OpenMP no disponible en esta compilacion, se ignora argumento 6.'
-                    use_parallel = .false.
+        end do
+
+        found_range = .false.
+        do i = 1, argc
+            if (skip(i)) cycle
+            lowered = adjustl(args(i))
+            do j = 1, len_trim(lowered)
+                if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
+            end do
+            if (trim(lowered) == '-n') then
+                if (i == argc) then
+                    write(error_unit,'(A)') 'Error: falta especificación después de -N.'
+                    call print_usage(omp_available)
+                    stop 1
                 end if
-            case ('noomp', 'NOOMP', 'no', 'NO', '0', 'false', 'FALSE')
-                use_parallel = .false.
-            case default
-                write(error_unit,'(A)') 'Advertencia: argumento 6 desconocido; opciones validas: omp/noomp.'
-            end select
+                spec = adjustl(args(i+1))
+                colon_pos = index(spec, ':')
+                if (colon_pos > 0) then
+                    read(spec(1:colon_pos-1),*,iostat=ios) level_min
+                    if (ios /= 0) then
+                        write(error_unit,'(A)') 'Error: límite inferior inválido en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
+                    read(spec(colon_pos+1:),*,iostat=ios) level_max
+                    if (ios /= 0) then
+                        write(error_unit,'(A)') 'Error: límite superior inválido en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
+                else
+                    read(spec,*,iostat=ios) level_min
+                    if (ios /= 0) then
+                        write(error_unit,'(A)') 'Error: especificación de nivel inválida en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
+                    if (level_min < 0) then
+                        level_min = 0
+                        level_max = -1
+                    else
+                        level_max = level_min
+                    end if
+                end if
+                skip(i) = .true.
+                if (i < argc) skip(i+1) = .true.
+                found_range = .true.
+            end if
+        end do
+        temp_set = .false.
+        max_subs_set = .false.
+        samples_set = .false.
+        seed_set = .false.
+        sampler_set = .false.
+        omp_set = .false.
+        do i = 1, argc
+            if (skip(i)) cycle
+            carg = args(i)
+            handled = .false.
+
+            lowered = adjustl(carg)
+            do j = 1, len_trim(lowered)
+                if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
+            end do
+
+            if (.not. sampler_set) then
+                if (trim(lowered) == 'uniform' .or. trim(lowered) == 'metropolis') then
+                    sampler = trim(lowered)
+                    sampler_set = .true.
+                    handled = .true.
+                end if
+            end if
+
+            if (.not. handled .and. .not. omp_set) then
+                if (trim(lowered) == 'omp' .or. trim(lowered) == 'noomp' .or. trim(lowered) == 'o' .or. trim(lowered) == 'no' .or. &
+                    trim(lowered) == 'true' .or. trim(lowered) == 'false' .or. trim(lowered) == '1' .or. trim(lowered) == '0') then
+                    call parse_omp_flag(carg, use_parallel, omp_available)
+                    omp_set = .true.
+                    handled = .true.
+                end if
+            end if
+
+            if (.not. handled .and. .not. temp_set) then
+                read(carg,*,iostat=ios) temp
+                if (ios == 0) then
+                    temp_set = .true.
+                    handled = .true.
+                end if
+            end if
+
+            if (.not. handled .and. .not. max_subs_set) then
+                read(carg,*,iostat=ios) max_subs
+                if (ios == 0) then
+                    max_subs_set = .true.
+                    handled = .true.
+                end if
+            end if
+
+            if (.not. handled .and. .not. samples_set) then
+                read(carg,*,iostat=ios) samples_level
+                if (ios == 0) then
+                    if (samples_level <= 0) then
+                        write(error_unit,'(A)') 'Advertencia: Nsamples debe ser positivo, se usan 5000 muestras'
+                        samples_level = 5000
+                    end if
+                    samples_set = .true.
+                    handled = .true.
+                end if
+            end if
+
+            if (.not. handled .and. .not. seed_set) then
+                read(carg,*,iostat=ios) seed
+                if (ios == 0) then
+                    seed_set = .true.
+                    handled = .true.
+                end if
+            end if
+
+            if (.not. handled) then
+                write(error_unit,'(A)') 'Advertencia: argumento ignorado -> '//trim(carg)
+            end if
+        end do
+
+        if (.not. found_range .and. level_max >= 0) then
+            ! no explicit -N but level_max was set via defaults; ensure consistent state
+            if (level_min < 0) level_min = 0
         end if
+
+        if (allocated(args)) deallocate(args)
+        if (allocated(skip)) deallocate(skip)
     end subroutine parse_arguments
+
+    ! Interprets an OpenMP flag token and updates the parallel execution mode.
+    subroutine parse_omp_flag(raw, use_parallel, omp_available)
+        character(len=*), intent(in) :: raw
+        logical, intent(inout) :: use_parallel
+        logical, intent(in) :: omp_available
+        character(len=256) :: token
+        integer :: i, lt
+
+        token = adjustl(raw)
+        lt = len_trim(token)
+        do i = 1, lt
+            if (token(i:i) >= 'A' .and. token(i:i) <= 'Z') token(i:i) = achar(iachar(token(i:i)) + 32)
+        end do
+
+        select case (trim(token))
+        case ('omp', 'o', '1', 'true')
+            if (omp_available) then
+                use_parallel = .true.
+            else
+                write(error_unit,'(A)') 'Advertencia: OpenMP no disponible en esta compilación, se ignora argumento.'
+                use_parallel = .false.
+            end if
+        case ('noomp', 'no', '0', 'false')
+            use_parallel = .false.
+        case default
+            write(error_unit,'(A)') 'Advertencia: argumento desconocido para modo paralelo; se mantiene configuración previa.'
+        end select
+    end subroutine parse_omp_flag
 
     ! Emits program usage information including optional OpenMP note.
     subroutine print_usage(omp_available)
         logical, intent(in) :: omp_available
 
-        write(*,'(A)') 'Uso: sod_boltzmann_mc [T_K] [Nmax] [Nsamples] [seed] [sampler] [omp|noomp]'
+    write(*,'(A)') 'Uso: sod_boltzmann_mc [T_K] [Nmax] [Nsamples] [seed] [sampler] [omp|noomp] [--force-mc]'
         write(*,'(A)') '       sod_boltzmann_mc --help'
         write(*,'(A)') ''
     write(*,'(A)') 'Argumentos opcionales (por defecto entre corchetes):'
+    write(*,'(A)') '  -N espec   Rango de niveles: p.ej. -N 5 (solo nivel 5), -N 3:8 (del 3 al 8), -N -1 (todos).'
     write(*,'(A)') '  T_K        Temperatura en Kelvin para los pesos de Boltzmann [1000].'
-    write(*,'(A)') '  Nmax       Número máximo de sustituciones evaluadas por nivel [-1 -> todos].'
-    write(*,'(A)') '  Nsamples   Muestras MC por nivel cuando el número de combinaciones'// &
-             ' supera el umbral [5000].'
-    write(*,'(A)') '  seed       Semilla del generador aleatorio [-1 -> semilla desde system_clock].'
-    write(*,'(A)') '  sampler    "uniform" para muestreo sin sesgo, "metropolis" para Metropolis-Hastings ['// &
-             'uniform].'
+    write(*,'(A)') '  Nmax       Número máximo de sustituciones evaluadas cuando no se usa -N [-1 -> todos].'
+        write(*,'(A)') '  Nsamples   Muestras MC por nivel cuando el número de combinaciones'// &
+                     ' supera el umbral [5000].'
+        write(*,'(A)') '  seed       Semilla del generador aleatorio [-1 -> semilla desde system_clock].'
+        write(*,'(A)') '  sampler    "uniform" para muestreo sin sesgo, "metropolis" para Metropolis-Hastings ['// &
+                     'uniform].'
+        write(*,'(A)') '  --force-mc Fuerza muestreo Monte Carlo incluso si C(N,npos) <= umbral de enumeración.'
         if (omp_available) then
             write(*,'(A)') '  omp|noomp  Control del uso de OpenMP si el binario lo soporta [noomp].'
         else
@@ -360,17 +494,19 @@ contains
 
     ! Chooses exhaustive or stochastic evaluation for a substitution level and dispatches it.
     subroutine process_level(level, total_sites, config, temperature, samples_level, max_exact, sampler, &
-                             use_parallel, summary_unit, summary_txt_unit)
+                             force_sampling, use_parallel, summary_unit, summary_txt_unit)
         integer, intent(in) :: level, total_sites, samples_level, max_exact
         integer, intent(inout) :: config(:)
         real(dp), intent(in) :: temperature
         character(len=*), intent(in) :: sampler
+        logical, intent(in) :: force_sampling
         logical, intent(in) :: use_parallel
         integer, intent(in) :: summary_unit, summary_txt_unit
 
         integer(ip) :: total_comb
         integer :: ncomb_int
         logical :: use_sampling
+        logical :: force_this_level
 
         if (level > total_sites) return
 
@@ -380,15 +516,26 @@ contains
             return
         end if
 
-        use_sampling = (total_comb > max_exact)
+        force_this_level = force_sampling .and. (level > 0 .and. level < total_sites)
+
+        if (level == 0 .or. level == total_sites) then
+            use_sampling = .false.
+        else
+            use_sampling = force_this_level .or. (total_comb > max_exact)
+        end if
 
         if (use_sampling) then
-            if (sampler == 'metropolis') then
+            if (force_this_level .and. total_comb <= max_exact) then
+                write(*,'(A,I0,A,I0,A,I0,A)') 'Nivel ', level, ': muestreo MC forzado (combinaciones=', int(total_comb, kind=kind(max_exact)), ', umbral exacto=', max_exact, ').'
+            else if (sampler == 'metropolis') then
                 write(*,'(A,I0,A)') 'Nivel ', level, ': se usa muestreo Monte Carlo tipo Metropolis-Hastings.'
+            else
+                write(*,'(A,I0,A)') 'Nivel ', level, ': se usa muestreo Monte Carlo uniforme.'
+            end if
+            if (sampler == 'metropolis') then
                 call metropolis_level(level, total_sites, config, temperature, samples_level, total_comb, &
                                       use_parallel, summary_unit, summary_txt_unit)
             else
-                write(*,'(A,I0,A)') 'Nivel ', level, ': se usa muestreo Monte Carlo uniforme.'
                 call monte_carlo_level(level, total_sites, config, temperature, samples_level, total_comb, &
                                        use_parallel, summary_unit, summary_txt_unit)
             end if
@@ -472,12 +619,27 @@ contains
         integer, intent(in) :: summary_unit, summary_txt_unit
 
         integer :: subset(max(1, level))
-        integer :: valid_samples
+        integer :: unique_count
+        integer :: unique_cap
+        integer :: samples_target
+        integer :: attempt_count, max_attempts
         real(dp), allocatable :: energies(:), energies_low(:), energies_high(:)
         real(dp) :: best_energy
         integer :: best_subset(max(1, level))
         integer :: best_count
         integer :: trace_unit
+        integer :: calib_best_idx
+        integer, allocatable :: unique_subsets(:,:)
+        real(dp), allocatable :: low_contribs(:,:), high_contribs(:,:)
+        real(dp) :: low_contrib_tmp(4), high_contrib_tmp(4)
+        integer, allocatable :: eqmatrix(:,:)
+        integer, allocatable :: canonical_subset(:)
+        integer :: existing
+        integer :: nop, npos
+        integer(ip) :: cap_ip
+        real(dp), allocatable :: gulp_energies(:)
+        logical :: gulp_success
+        real(dp) :: sum_energy, sumsq_energy, mean_energy, variance_energy, std_energy
 
         if (level == 0) then
             call exhaustive_level(level, total_sites, config, temperature, total_comb, 1, use_parallel, &
@@ -485,41 +647,144 @@ contains
             return
         end if
 
-        allocate(energies(samples_level))
-        allocate(energies_low(samples_level))
-        allocate(energies_high(samples_level))
-        valid_samples = 0
+    samples_target = max(1, max(samples_level, uniform_unique_cap))
+        if (total_comb > 0_ip) then
+            cap_ip = min(total_comb, int(uniform_unique_cap, kind=ip))
+        else
+            cap_ip = int(uniform_unique_cap, kind=ip)
+        end if
+        unique_cap = max(1, int(cap_ip))
+        allocate(energies(unique_cap))
+        allocate(energies_low(unique_cap))
+        allocate(energies_high(unique_cap))
+        allocate(unique_subsets(level, unique_cap))
+        allocate(low_contribs(4, unique_cap))
+        allocate(high_contribs(4, unique_cap))
+        allocate(gulp_energies(unique_cap))
+        allocate(canonical_subset(level))
+        call get_eqmatrix(eqmatrix, nop, npos)
+        if (.not. allocated(eqmatrix)) then
+            write(*,'(A)') 'Aviso: no se pudo obtener EQMATRIX para la deduplicacion de muestras.'
+            call flush(output_unit)
+            deallocate(energies, energies_low, energies_high, unique_subsets, low_contribs, high_contribs, gulp_energies, canonical_subset)
+            return
+        end if
+        calib_best_idx = 0
+        unique_count = 0
+        unique_subsets = 0
+        energies = 0.0_dp
+        energies_low = huge(1.0_dp)
+        energies_high = huge(1.0_dp)
+        low_contribs = 0.0_dp
+        high_contribs = 0.0_dp
         best_energy = huge(1.0_dp)
         best_subset = 0
         best_count = 0
+        config = 1
         call open_mc_trace_file(level, trace_unit)
+        attempt_count = 0
+        max_attempts = max(50, samples_target * 50)
 
-        do while (valid_samples < samples_level)
+    ! Deduplica muestras uniformes hasta reunir configuraciones simetricamente unicas.
+        do while (unique_count < unique_cap .and. attempt_count < max_attempts)
             call random_subset(total_sites, level, subset)
+            call canonicalize_subset(subset, level, eqmatrix, nop, canonical_subset)
+            existing = find_subset_index(canonical_subset, level, unique_subsets, unique_count)
+            attempt_count = attempt_count + 1
+            if (existing /= 0) cycle
+
+            unique_count = unique_count + 1
+            unique_subsets(:, unique_count) = canonical_subset(1:level)
             config = 1
-            config(subset(1:level)) = 2
-            valid_samples = valid_samples + 1
-            call calculate_structure_energy(config, total_sites, energies(valid_samples), &
-                                            energies_low(valid_samples), energies_high(valid_samples))
-            if (energies(valid_samples) < best_energy) then
-                best_energy = energies(valid_samples)
-                best_subset(1:level) = subset(1:level)
+            config(canonical_subset(1:level)) = 2
+            call calculate_structure_energy(config, total_sites, energies(unique_count), &
+                                            energy_low_side=energies_low(unique_count), energy_high_side=energies_high(unique_count), &
+                                            low_contrib=low_contrib_tmp, high_contrib=high_contrib_tmp)
+            low_contribs(:, unique_count) = low_contrib_tmp
+            high_contribs(:, unique_count) = high_contrib_tmp
+            if (energies(unique_count) < best_energy) then
+                best_energy = energies(unique_count)
+                best_subset(1:level) = canonical_subset(1:level)
                 best_count = level
             end if
             if (trace_unit /= 0) then
-                call write_mc_trace_step(trace_unit, valid_samples, valid_samples, energies(valid_samples), &
-                                         energies_low(valid_samples), energies_high(valid_samples))
+                call write_mc_trace_step(trace_unit, unique_count, unique_count, energies(unique_count), &
+                                         energies_low(unique_count), energies_high(unique_count))
                 call flush(trace_unit)
             end if
         end do
 
-    call summarize_level(level, total_sites, temperature, total_comb, real(valid_samples, dp), energies(1:valid_samples), &
+        if (attempt_count >= max_attempts .and. unique_count < unique_cap) then
+            write(*,'(A,I0,A,I0,A)') 'Nivel ', level, ': muestreo aleatorio alcanzó ', attempt_count, ' intentos sin cubrir el cupo unico.'
+            call flush(output_unit)
+        end if
+
+        if (unique_count == 0) then
+            write(*,'(A,I0)') 'Nivel ', level, ': no se pudo obtener ninguna configuracion unica.'
+            call flush(output_unit)
+            if (trace_unit /= 0) call close_mc_trace_file(trace_unit)
+            if (allocated(eqmatrix)) deallocate(eqmatrix)
+            deallocate(energies, energies_low, energies_high, unique_subsets, low_contribs, high_contribs, gulp_energies, canonical_subset)
+            return
+        else
+            write(*,'(A,I0,A,I0)') 'Nivel ', level, ': configuraciones unicas acumuladas: ', unique_count
+            call flush(output_unit)
+            if (unique_count < uniform_unique_cap) then
+                write(*,'(A,I0,A,I0,A)') 'Nivel ', level, ': objetivo de ', uniform_unique_cap, ' muestras unicas no alcanzado.'
+                call flush(output_unit)
+            end if
+        end if
+
+        call attempt_calibration_from_samples(level, total_sites, 1, unique_count, unique_subsets, &
+             energies, energies_low, energies_high, low_contribs, high_contribs, calib_best_idx)
+        if (calib_best_idx > 0) then
+            best_energy = energies(calib_best_idx)
+            best_subset(1:level) = unique_subsets(:, calib_best_idx)
+            best_count = level
+        end if
+
+        gulp_success = .false.
+        gulp_energies = 0.0_dp
+    ! Evalua energias precisas con GULP para las configuraciones unicas guardadas.
+    call evaluate_subsets_with_gulp(level, total_sites, unique_count, unique_subsets(:,1:unique_count), config, gulp_energies, gulp_success)
+        if (gulp_success) then
+            energies(1:unique_count) = gulp_energies(1:unique_count)
+            best_energy = minval(energies(1:unique_count))
+            existing = 1
+            do while (existing <= unique_count)
+                if (energies(existing) == best_energy) then
+                    best_subset(1:level) = unique_subsets(:, existing)
+                    exit
+                end if
+                existing = existing + 1
+            end do
+            sum_energy = 0.0_dp
+            sumsq_energy = 0.0_dp
+            do existing = 1, unique_count
+                sum_energy = sum_energy + energies(existing)
+                sumsq_energy = sumsq_energy + energies(existing)**2
+            end do
+            mean_energy = sum_energy / real(unique_count, dp)
+            variance_energy = max(0.0_dp, (sumsq_energy / real(unique_count, dp)) - mean_energy**2)
+            std_energy = sqrt(variance_energy)
+            write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': media GULP = ', mean_energy, ' eV, desviacion = ', std_energy
+            call flush(output_unit)
+        else
+            write(*,'(A,I0,A)') 'Nivel ', level, ': no se pudieron evaluar todas las muestras con GULP; se mantienen energias internas.'
+            call flush(output_unit)
+        end if
+        config = 1
+
+        call summarize_level(level, total_sites, temperature, total_comb, real(unique_count, dp), energies(1:unique_count), &
                  best_energy, best_subset, best_count, 0, &
-                 energies_low(1:valid_samples), energies_high(1:valid_samples), &
+                 energies_low(1:unique_count), energies_high(1:unique_count), &
                  use_parallel, summary_unit, summary_txt_unit)
 
         if (trace_unit /= 0) call close_mc_trace_file(trace_unit)
-        deallocate(energies, energies_low, energies_high)
+        if (allocated(eqmatrix)) deallocate(eqmatrix)
+        if (allocated(gulp_energies)) deallocate(gulp_energies)
+        if (allocated(canonical_subset)) deallocate(canonical_subset)
+        deallocate(energies, energies_low, energies_high, unique_subsets, low_contribs, high_contribs)
     end subroutine monte_carlo_level
 
     ! Runs a Metropolis-Hastings walk with optional restart moves for a substitution level.
@@ -554,6 +819,10 @@ contains
         logical :: use_restart_move
         integer :: restart_attempts, restart_accepts
         integer :: flip_attempts, flip_accepts
+        integer :: calib_best_idx
+        integer, allocatable :: sampled_subsets(:,:)
+        real(dp), allocatable :: low_contribs(:,:), high_contribs(:,:)
+        real(dp) :: low_contrib_tmp(4), high_contrib_tmp(4)
 
         if (level == 0) then
             call exhaustive_level(level, total_sites, config, temperature, total_comb, 1, use_parallel, &
@@ -564,6 +833,12 @@ contains
         allocate(energies(samples_level))
         allocate(energies_low(samples_level))
         allocate(energies_high(samples_level))
+        calib_best_idx = 0
+        if (level > 0) then
+            allocate(sampled_subsets(level, samples_level))
+            allocate(low_contribs(4, samples_level))
+            allocate(high_contribs(4, samples_level))
+        end if
 
         beta = 1.0_dp / (kB_eVk * temperature)
         skipped = 0
@@ -571,7 +846,8 @@ contains
         call random_subset(total_sites, level, current_subset)
         config = 1
         config(current_subset(1:level)) = 2
-        call calculate_structure_energy(config, total_sites, current_energy, current_low, current_high)
+        call calculate_structure_energy(config, total_sites, current_energy, energy_low_side=current_low, &
+                                        energy_high_side=current_high, low_contrib=low_contrib_tmp, high_contrib=high_contrib_tmp)
         best_energy = current_energy
         best_subset = current_subset
         best_count = level
@@ -579,6 +855,11 @@ contains
         energies(accept_count) = current_energy
         energies_low(accept_count) = current_low
         energies_high(accept_count) = current_high
+        if (level > 0) then
+            sampled_subsets(:, accept_count) = current_subset(1:level)
+            low_contribs(:, accept_count) = low_contrib_tmp
+            high_contribs(:, accept_count) = high_contrib_tmp
+        end if
         best_step = accept_count
         call open_mc_trace_file(level, trace_unit)
         if (trace_unit /= 0) then
@@ -626,7 +907,8 @@ contains
 
             config = 1
             config(trial_subset(1:level)) = 2
-            call calculate_structure_energy(config, total_sites, trial_energy, trial_low, trial_high)
+            call calculate_structure_energy(config, total_sites, trial_energy, energy_low_side=trial_low, &
+                                            energy_high_side=trial_high, low_contrib=low_contrib_tmp, high_contrib=high_contrib_tmp)
 
             if (use_restart_move .and. force_restart_accept) then
                 accepted = .true.
@@ -654,6 +936,11 @@ contains
                 energies(accept_count) = current_energy
                 energies_low(accept_count) = current_low
                 energies_high(accept_count) = current_high
+                if (level > 0) then
+                    sampled_subsets(:, accept_count) = current_subset(1:level)
+                    low_contribs(:, accept_count) = low_contrib_tmp
+                    high_contribs(:, accept_count) = high_contrib_tmp
+                end if
                 if (current_energy < best_energy) then
                     best_energy = current_energy
                     best_subset = current_subset
@@ -676,6 +963,18 @@ contains
             write(*,'(A,I0)') 'Metropolis: configuraciones descartadas en equilibrado = ', burn_start - 1
         end if
 
+        if (level > 0 .and. accept_count >= burn_start) then
+            call attempt_calibration_from_samples(level, total_sites, burn_start, accept_count, sampled_subsets, &
+                 energies, energies_low, energies_high, low_contribs, high_contribs, calib_best_idx)
+            if (calib_best_idx > 0) then
+                best_energy = energies(calib_best_idx)
+                if (level > 0) best_subset(1:level) = sampled_subsets(:, calib_best_idx)
+                best_count = level
+                best_step = calib_best_idx
+                best_in_subset = (best_step >= burn_start)
+            end if
+        end if
+
         call summarize_level(level, total_sites, temperature, total_comb, real(accept_count, dp), &
                  energies(burn_start:accept_count), best_energy, best_subset, best_count, skipped, &
                  energies_low(burn_start:accept_count), energies_high(burn_start:accept_count), &
@@ -683,8 +982,206 @@ contains
                  restart_attempts, restart_accepts, flip_attempts, flip_accepts)
 
         if (trace_unit /= 0) call close_mc_trace_file(trace_unit)
+        if (level > 0) then
+            if (allocated(sampled_subsets)) deallocate(sampled_subsets)
+            if (allocated(low_contribs)) deallocate(low_contribs)
+            if (allocated(high_contribs)) deallocate(high_contribs)
+        end if
         deallocate(energies, energies_low, energies_high)
     end subroutine metropolis_level
+
+    subroutine attempt_calibration_from_samples(level, total_sites, sample_start, sample_end, subsets, energies, energies_low, energies_high, low_contribs, high_contribs, best_index)
+        integer, intent(in) :: level, total_sites, sample_start, sample_end
+        integer, intent(in) :: subsets(:,:)
+        real(dp), intent(inout) :: energies(:), energies_low(:), energies_high(:)
+        real(dp), intent(in) :: low_contribs(:,:), high_contribs(:,:)
+        integer, intent(out), optional :: best_index
+
+        integer :: sample_count, idx, actual_idx, best_global_idx
+        integer :: hole_count
+        integer :: nop, npos
+        integer, allocatable :: eqmatrix(:,:), unique_subsets(:,:), unique_deg(:)
+        integer, allocatable :: sample_map(:), subset_buf(:), canonical(:), config(:)
+        real(dp), allocatable :: unique_low(:), unique_high(:)
+        real(dp), allocatable :: unique_low_contrib(:,:), unique_high_contrib(:,:)
+        real(dp), allocatable :: unique_low_max(:), unique_high_max(:)
+        real(dp) :: val_low, val_high
+        real(dp) :: huge_marker
+        integer :: existing, unique_count
+        logical :: need_low_calib, need_high_calib, do_calibrate
+        logical :: have_low, have_high
+        real(dp) :: min_low, max_low, min_high, max_high
+        integer :: best_loc(1)
+        real(dp) :: w_low, w_high, mix_beta, x_ge
+
+        if (present(best_index)) best_index = 0
+
+        if (level <= 0) return
+        if (sample_end < sample_start) return
+
+        sample_count = sample_end - sample_start + 1
+        if (sample_count <= 0) return
+
+        hole_count = total_sites - level
+        need_low_calib = (level > get_max_low_order())
+        need_high_calib = (hole_count > get_max_high_order())
+        if (.not. (need_low_calib .or. need_high_calib)) return
+
+        call get_eqmatrix(eqmatrix, nop, npos)
+        if (.not. allocated(eqmatrix)) return
+        if (level > size(subsets,1)) then
+            if (allocated(eqmatrix)) deallocate(eqmatrix)
+            return
+        end if
+
+        huge_marker = huge(1.0_dp) * 0.5_dp
+        allocate(unique_subsets(level, sample_count))
+        allocate(unique_low(sample_count))
+        allocate(unique_high(sample_count))
+        allocate(unique_low_contrib(4, sample_count))
+        allocate(unique_high_contrib(4, sample_count))
+        allocate(unique_low_max(sample_count))
+        allocate(unique_high_max(sample_count))
+        allocate(unique_deg(sample_count))
+        allocate(sample_map(sample_count))
+        allocate(subset_buf(level))
+        allocate(canonical(level))
+
+        unique_low = huge_marker
+        unique_high = huge_marker
+        unique_low_max = -huge_marker
+        unique_high_max = -huge_marker
+        unique_low_contrib = 0.0_dp
+        unique_high_contrib = 0.0_dp
+        unique_deg = 0
+        unique_count = 0
+        sample_map = 0
+
+        do idx = 1, sample_count
+            actual_idx = sample_start + idx - 1
+            subset_buf = subsets(1:level, actual_idx)
+            call canonicalize_subset(subset_buf, level, eqmatrix, nop, canonical)
+            existing = find_subset_index(canonical, level, unique_subsets, unique_count)
+            if (existing == 0) then
+                unique_count = unique_count + 1
+                unique_subsets(:, unique_count) = canonical
+                unique_deg(unique_count) = 1
+                existing = unique_count
+            else
+                unique_deg(existing) = unique_deg(existing) + 1
+            end if
+            sample_map(idx) = existing
+
+            val_low = energies_low(actual_idx)
+            if (abs(val_low) < huge_marker) then
+                if (val_low < unique_low(existing)) then
+                    unique_low(existing) = val_low
+                    unique_low_contrib(:, existing) = low_contribs(:, actual_idx)
+                end if
+                if (val_low > unique_low_max(existing)) unique_low_max(existing) = val_low
+            end if
+
+            val_high = energies_high(actual_idx)
+            if (abs(val_high) < huge_marker) then
+                if (val_high < unique_high(existing)) then
+                    unique_high(existing) = val_high
+                    unique_high_contrib(:, existing) = high_contribs(:, actual_idx)
+                end if
+                if (val_high > unique_high_max(existing)) unique_high_max(existing) = val_high
+            end if
+        end do
+
+        have_low = any(abs(unique_low(1:unique_count)) < huge_marker)
+        have_high = any(abs(unique_high(1:unique_count)) < huge_marker)
+        need_low_calib = need_low_calib .and. have_low
+        need_high_calib = need_high_calib .and. have_high
+        do_calibrate = need_low_calib .and. need_high_calib
+
+        if (have_low) then
+            min_low = huge_marker
+            max_low = -huge_marker
+            do idx = 1, unique_count
+                if (abs(unique_low(idx)) < huge_marker) then
+                    if (unique_low(idx) < min_low) min_low = unique_low(idx)
+                end if
+                if (unique_low_max(idx) > max_low) max_low = unique_low_max(idx)
+            end do
+            write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': energia lado Si min=', min_low, ', max=', max_low
+        end if
+        if (have_high) then
+            min_high = huge_marker
+            max_high = -huge_marker
+            do idx = 1, unique_count
+                if (abs(unique_high(idx)) < huge_marker) then
+                    if (unique_high(idx) < min_high) min_high = unique_high(idx)
+                end if
+                if (unique_high_max(idx) > max_high) max_high = unique_high_max(idx)
+            end do
+            write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': energia lado Ge min=', min_high, ', max=', max_high
+        end if
+
+        if (do_calibrate .and. unique_count >= 5) then
+            allocate(config(total_sites))
+            config = 1
+            call calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets(:,1:unique_count), &
+                 unique_low_contrib(:,1:unique_count), unique_high_contrib(:,1:unique_count), unique_deg(1:unique_count), &
+                 unique_low(1:unique_count), unique_high(1:unique_count), config, need_low_calib, need_high_calib)
+            deallocate(config)
+
+            do idx = 1, sample_count
+                existing = sample_map(idx)
+                if (existing <= 0) cycle
+                actual_idx = sample_start + idx - 1
+                if (need_low_calib .and. abs(unique_low(existing)) < huge_marker) then
+                    energies_low(actual_idx) = unique_low(existing)
+                end if
+                if (need_high_calib .and. abs(unique_high(existing)) < huge_marker) then
+                    energies_high(actual_idx) = unique_high(existing)
+                end if
+            end do
+
+            ! Recompose total energies using calibrated low/high estimates.
+            mix_beta = 8.0_dp
+            x_ge = real(level, dp) / real(total_sites, dp)
+            if (have_high) then
+                w_high = 0.5_dp * (1.0_dp + tanh(mix_beta * (x_ge - 0.5_dp)))
+            else
+                w_high = 0.0_dp
+            end if
+            w_low = 1.0_dp - w_high
+
+            do idx = 1, sample_count
+                actual_idx = sample_start + idx - 1
+                if (have_high .and. energies_high(actual_idx) < huge_marker) then
+                    energies(actual_idx) = w_low * energies_low(actual_idx) + w_high * energies_high(actual_idx)
+                else
+                    energies(actual_idx) = energies_low(actual_idx)
+                end if
+            end do
+
+            ! Propagate the updated best-sample index to the caller if needed.
+            if (present(best_index)) then
+                best_loc = minloc(energies(sample_start:sample_end))
+                best_global_idx = sample_start + best_loc(1) - 1
+                best_index = best_global_idx
+            end if
+
+            write(*,'(A,I0,A,I0)') 'Calibracion MC completada en nivel ', level, ' con ', unique_count
+            call flush(output_unit)
+        else
+            if (do_calibrate) then
+                write(*,'(A,I0)') 'Calibracion MC omitida por configuraciones unicas insuficientes en nivel ', level
+            else if (need_low_calib .neqv. need_high_calib) then
+                write(*,'(A,I0)') 'Calibracion MC omitida porque solo un lado requiere ajuste en nivel ', level
+            end if
+        end if
+
+        if (allocated(eqmatrix)) deallocate(eqmatrix)
+        deallocate(unique_subsets, unique_low, unique_high, unique_low_contrib, unique_high_contrib)
+        deallocate(unique_low_max, unique_high_max)
+        deallocate(unique_deg, sample_map, subset_buf, canonical)
+
+    end subroutine attempt_calibration_from_samples
 
     ! Computes Boltzmann statistics for a level and records them to screen and summaries.
     subroutine summarize_level(level, total_sites, temperature, total_comb, processed, energies, best_energy, best_positions, &

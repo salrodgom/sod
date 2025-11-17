@@ -6,6 +6,7 @@ program sod_boltzmann_exact
     use sod_boltzmann_consts
     use sod_boltzmann_utils
     use energy_calc
+    use sod_calibration
     use, intrinsic :: iso_fortran_env, only: output_unit
     implicit none
 
@@ -18,6 +19,10 @@ program sod_boltzmann_exact
     real(dp), parameter :: conv_ev_to_kjmol = 96.48533212331_dp
     real(dp), parameter :: quartz_ge_energy = -121.812200998519_dp
     real(dp), parameter :: quartz_si_energy = -128.799143746482_dp
+    integer, parameter :: mix_n = 6
+    integer, parameter :: mix_m = 12
+    real(dp), parameter :: mix_x0 = 0.5_dp
+    real(dp), parameter :: mix_d0 = 0.01_dp
 
     call parse_arguments_exact(level_min, level_max, energy_tolerance)
 
@@ -231,11 +236,8 @@ contains
     integer, allocatable :: tmp_subsets(:,:)
     integer, allocatable :: tmp_deg(:)
     real(dp), allocatable :: tmp_low(:), tmp_high(:)
-    integer :: unit_summary, ios_summary
-    logical :: summary_exists
     logical :: allow_low_estimate, allow_high_estimate
     logical :: has_low_data, has_high_data
-    character(len=64) :: summary_filename
     integer, allocatable :: eqmatrix_local(:,:)
     character(len=80), parameter :: separator = '------------------------------------------------------------------------'
     real(dp), parameter :: sentinel_energy = huge(1.0_dp)
@@ -248,16 +250,25 @@ contains
     real(dp) :: variance_low_all, variance_high_all
     real(dp) :: weighted_low_sum, weighted_high_sum
     real(dp) :: weighted_low_sq_sum, weighted_high_sq_sum
+    real(dp) :: weighted_total_sum, weighted_total_sq_sum
         integer :: total_low_weight, total_high_weight
+        integer :: total_total_weight
         real(dp) :: min_low_energy, min_high_energy
+        real(dp) :: min_total_energy
         real(dp) :: degeneracy_weight
         real(dp) :: boltzmann_low_weight_sum, boltzmann_high_weight_sum
+        real(dp) :: boltzmann_total_weight_sum
         real(dp) :: boltzmann_low_energy_sum, boltzmann_high_energy_sum
+        real(dp) :: boltzmann_total_energy_sum
         real(dp) :: boltzmann_low_energy_sq_sum, boltzmann_high_energy_sq_sum
+        real(dp) :: boltzmann_total_energy_sq_sum
         real(dp) :: boltzmann_reference_low, boltzmann_reference_high
+        real(dp) :: boltzmann_reference_total
         real(dp) :: boltzmann_factor
         real(dp) :: boltzmann_mean_low, boltzmann_variance_low
         real(dp) :: boltzmann_mean_high, boltzmann_variance_high
+        real(dp) :: boltzmann_mean_total, boltzmann_variance_total
+        real(dp) :: mean_total_all, variance_total_all
         real(dp) :: entropy_low, entropy_high
         real(dp) :: ts_low(3), ts_high(3)
         real(dp) :: free_energy_low(3), free_energy_high(3)
@@ -267,6 +278,12 @@ contains
         real(dp) :: best_energy_si, best_energy_ge
         integer :: hole_count
         logical :: need_low_calibration, need_high_calibration
+    real(dp) :: ge_fraction, weight_low, weight_high
+    real(dp) :: expected_mix
+    real(dp) :: delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix
+    real(dp) :: accept_ratio
+    real(dp) :: combined_energy
+    logical :: valid_low, valid_high, valid_total
 
         ! Get EQMATRIX for symmetry checking
         call get_eqmatrix(eqmatrix_local, nop_local, i)
@@ -336,14 +353,62 @@ contains
             deltaF_quartz_si = 0.0_dp
             deltaF_quartz_ge = 0.0_dp
 
-            if (allow_low_estimate) then
-                total_low_weight = 1
-                mean_low_all = low_estimate
-                min_low_energy = low_estimate
-                boltzmann_mean_low = low_estimate
-                free_energy_low = (/low_estimate, low_estimate, low_estimate/)
-                deltaF_quartz_si = quartz_relative(level, total_sites, free_energy_low(1))
+
+            ge_fraction = 0.0_dp
+            if (total_sites > 0) ge_fraction = real(level, dp) / real(total_sites, dp)
+            weight_low = mixing_weight(ge_fraction)
+            weight_low = max(0.0_dp, min(1.0_dp, weight_low))
+            weight_high = 1.0_dp - weight_low
+            valid_low = allow_low_estimate
+            valid_high = allow_high_estimate
+            valid_total = valid_low .or. valid_high
+
+            if (valid_low .and. valid_high) then
+                combined_energy = weight_low * low_estimate + weight_high * high_estimate
+            else if (valid_low) then
+                combined_energy = low_estimate
+            else if (valid_high) then
+                combined_energy = high_estimate
+            else
+                combined_energy = 0.0_dp
             end if
+
+            min_total_energy = combined_energy
+            mean_total_all = combined_energy
+            variance_total_all = 0.0_dp
+            boltzmann_mean_total = combined_energy
+            boltzmann_variance_total = 0.0_dp
+            expected_mix = combined_energy
+
+            if (.not. valid_low) then
+                min_low_energy = 0.0_dp
+                boltzmann_mean_low = 0.0_dp
+            else
+                min_low_energy = low_estimate
+            end if
+
+            if (.not. valid_high) then
+                min_high_energy = 0.0_dp
+                boltzmann_mean_high = 0.0_dp
+            else
+                min_high_energy = high_estimate
+            end if
+
+            if (.not. valid_total) then
+                min_total_energy = 0.0_dp
+                boltzmann_mean_total = 0.0_dp
+                expected_mix = 0.0_dp
+            end if
+
+            delta_exp_total = merge(quartz_relative(level, total_sites, boltzmann_mean_total), 0.0_dp, valid_total)
+            delta_min_total = merge(quartz_relative(level, total_sites, min_total_energy), 0.0_dp, valid_total)
+            delta_exp_low = merge(quartz_relative(level, total_sites, boltzmann_mean_low), 0.0_dp, valid_low)
+            delta_min_low = merge(quartz_relative(level, total_sites, min_low_energy), 0.0_dp, valid_low)
+            delta_exp_high = merge(quartz_relative(level, total_sites, boltzmann_mean_high), 0.0_dp, valid_high)
+            delta_min_high = merge(quartz_relative(level, total_sites, min_high_energy), 0.0_dp, valid_high)
+            delta_exp_mix = merge(quartz_relative(level, total_sites, expected_mix), 0.0_dp, valid_total)
+            accept_ratio = 1.0_dp
+
 
             if (allow_high_estimate) then
                 total_high_weight = 1
@@ -412,21 +477,10 @@ contains
             call emit_side_statistics('lado Si', 'SI', level, best_count_si, best_energy_si, best_subsets_si, best_values_si, best_deg_si, total_sites, config, min_low_energy, mean_low_all, variance_low_all, entropy_low, has_low_data)
             call emit_side_statistics('lado Ge', 'GE', level, best_count_ge, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, total_sites, config, min_high_energy, mean_high_all, variance_high_all, entropy_high, has_high_data)
 
-            summary_filename = 'sod_boltzmann_exact.txt'
-            inquire(file=summary_filename, exist=summary_exists)
-            open(newunit=unit_summary, file=summary_filename, status='unknown', position='append', action='write', iostat=ios_summary)
-            if (ios_summary == 0) then
-                if (.not. summary_exists) then
-                    write(unit_summary,'(A)') '#Nivel DeltaF_Si_300_kJmol DeltaF_Ge_300_kJmol Media_Si_eV Media_Ge_eV Min_Si_eV Min_Ge_eV Varianza_Si_eV2 Varianza_Ge_eV2 Degeneracion_total Configs_inequivalentes Entropia_total_eV_perK Entropia_Si_eV_perK Entropia_Ge_eV_perK TS_Si_300_eV F_Si_300_eV TS_Ge_300_eV F_Ge_300_eV TS_Si_800_eV F_Si_800_eV TS_Ge_800_eV F_Ge_800_eV TS_Si_1200_eV F_Si_1200_eV TS_Ge_1200_eV F_Ge_1200_eV'
-                end if
-                write(unit_summary,'(I6,1X,8F18.8,1X,I0,1X,I0,1X,3F18.8,1X,12F18.8)') &
-                    level, deltaF_quartz_si, deltaF_quartz_ge, mean_low_all, mean_high_all, min_low_energy, min_high_energy, variance_low_all, variance_high_all, total_degeneracy_weight, 1, entropy_total, entropy_low, entropy_high, &
-                    ts_low(1), free_energy_low(1), ts_high(1), free_energy_high(1), ts_low(2), free_energy_low(2), ts_high(2), free_energy_high(2), ts_low(3), free_energy_low(3), ts_high(3), free_energy_high(3)
-                close(unit_summary)
-            else
-                write(*,'(A,I0,A)') 'Aviso: no se pudo escribir resumen en txt (iostat=', ios_summary, ')'
-                call flush(output_unit)
-            end if
+            call append_normalized_summary('sod_boltzmann_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
+                 boltzmann_variance_total, boltzmann_mean_low, min_low_energy, boltzmann_mean_high, min_high_energy, expected_mix, &
+                 delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix, &
+                 accept_ratio)
 
             deallocate(best_subsets_si)
             deallocate(best_subsets_ge)
@@ -525,21 +579,34 @@ contains
             call calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_low_contrib, unique_high_contrib, unique_deg, unique_low, unique_high, config, need_low_calibration, need_high_calibration)
         end if
 
+        ge_fraction = 0.0_dp
+        if (total_sites > 0) ge_fraction = real(level, dp) / real(total_sites, dp)
+        weight_low = mixing_weight(ge_fraction)
+        weight_low = max(0.0_dp, min(1.0_dp, weight_low))
+        weight_high = 1.0_dp - weight_low
+
         weighted_low_sum = 0.0_dp
         weighted_high_sum = 0.0_dp
         weighted_low_sq_sum = 0.0_dp
         weighted_high_sq_sum = 0.0_dp
+        weighted_total_sum = 0.0_dp
+        weighted_total_sq_sum = 0.0_dp
         boltzmann_low_weight_sum = 0.0_dp
         boltzmann_high_weight_sum = 0.0_dp
+        boltzmann_total_weight_sum = 0.0_dp
         boltzmann_low_energy_sum = 0.0_dp
         boltzmann_high_energy_sum = 0.0_dp
+        boltzmann_total_energy_sum = 0.0_dp
         boltzmann_low_energy_sq_sum = 0.0_dp
         boltzmann_high_energy_sq_sum = 0.0_dp
+        boltzmann_total_energy_sq_sum = 0.0_dp
         total_degeneracy_weight = 0
         total_low_weight = 0
         total_high_weight = 0
+        total_total_weight = 0
         min_low_energy = huge_marker
         min_high_energy = huge_marker
+        min_total_energy = huge_marker
 
         do idx = 1, unique_count
             degeneracy_weight = real(unique_deg(idx), dp)
@@ -557,6 +624,14 @@ contains
                 weighted_high_sum = weighted_high_sum + degeneracy_weight * unique_high(idx)
                 weighted_high_sq_sum = weighted_high_sq_sum + degeneracy_weight * unique_high(idx) * unique_high(idx)
                 if (unique_high(idx) < min_high_energy) min_high_energy = unique_high(idx)
+            end if
+
+            combined_energy = combined_energy_value(unique_low(idx), unique_high(idx), weight_low, weight_high)
+            if (combined_energy < huge_marker) then
+                total_total_weight = total_total_weight + unique_deg(idx)
+                weighted_total_sum = weighted_total_sum + degeneracy_weight * combined_energy
+                weighted_total_sq_sum = weighted_total_sq_sum + degeneracy_weight * combined_energy * combined_energy
+                if (combined_energy < min_total_energy) min_total_energy = combined_energy
             end if
         end do
 
@@ -578,12 +653,23 @@ contains
             min_high_energy = huge_marker
         end if
 
+        if (total_total_weight > 0) then
+            mean_total_all = weighted_total_sum / real(total_total_weight, dp)
+            variance_total_all = max(0.0_dp, weighted_total_sq_sum / real(total_total_weight, dp) - mean_total_all * mean_total_all)
+        else
+            mean_total_all = 0.0_dp
+            variance_total_all = 0.0_dp
+            min_total_energy = huge_marker
+        end if
+
         call write_level_outputs(level, total_sites, unique_count, unique_subsets, unique_deg, unique_low, unique_high)
 
         boltzmann_mean_low = mean_low_all
         boltzmann_variance_low = variance_low_all
         boltzmann_mean_high = mean_high_all
         boltzmann_variance_high = variance_high_all
+        boltzmann_mean_total = mean_total_all
+        boltzmann_variance_total = variance_total_all
 
         if (total_low_weight > 0) then
             boltzmann_reference_low = min_low_energy
@@ -627,6 +713,28 @@ contains
             end if
         end if
 
+        if (total_total_weight > 0) then
+            boltzmann_reference_total = min_total_energy
+            if (boltzmann_reference_total >= huge_marker) boltzmann_reference_total = mean_total_all
+            boltzmann_total_weight_sum = 0.0_dp
+            boltzmann_total_energy_sum = 0.0_dp
+            boltzmann_total_energy_sq_sum = 0.0_dp
+            do idx = 1, unique_count
+                degeneracy_weight = real(unique_deg(idx), dp)
+                combined_energy = combined_energy_value(unique_low(idx), unique_high(idx), weight_low, weight_high)
+                if (combined_energy < huge_marker) then
+                    boltzmann_factor = exp(-(combined_energy - boltzmann_reference_total) / (kB_eVk * boltzmann_temperature))
+                    boltzmann_total_weight_sum = boltzmann_total_weight_sum + degeneracy_weight * boltzmann_factor
+                    boltzmann_total_energy_sum = boltzmann_total_energy_sum + degeneracy_weight * boltzmann_factor * combined_energy
+                    boltzmann_total_energy_sq_sum = boltzmann_total_energy_sq_sum + degeneracy_weight * boltzmann_factor * combined_energy * combined_energy
+                end if
+            end do
+            if (boltzmann_total_weight_sum > 0.0_dp) then
+                boltzmann_mean_total = boltzmann_total_energy_sum / boltzmann_total_weight_sum
+                boltzmann_variance_total = max(0.0_dp, boltzmann_total_energy_sq_sum / boltzmann_total_weight_sum - boltzmann_mean_total * boltzmann_mean_total)
+            end if
+        end if
+
         if (total_low_weight > 0) then
             entropy_low = kB_eVk * log(real(total_low_weight, dp))
             ts_low = entropy_low * temp_targets
@@ -659,6 +767,29 @@ contains
 
         if (min_low_energy >= huge_marker) min_low_energy = mean_low_all
         if (min_high_energy >= huge_marker) min_high_energy = mean_high_all
+        if (min_total_energy >= huge_marker) min_total_energy = mean_total_all
+
+        if (total_low_weight > 0 .and. total_high_weight > 0) then
+            expected_mix = weight_low * boltzmann_mean_low + weight_high * boltzmann_mean_high
+        else if (total_low_weight > 0) then
+            expected_mix = boltzmann_mean_low
+        else if (total_high_weight > 0) then
+            expected_mix = boltzmann_mean_high
+        else
+            expected_mix = boltzmann_mean_total
+        end if
+
+        valid_low = (total_low_weight > 0)
+        valid_high = (total_high_weight > 0)
+        valid_total = (total_total_weight > 0)
+        delta_exp_total = merge(quartz_relative(level, total_sites, boltzmann_mean_total), 0.0_dp, valid_total)
+        delta_min_total = merge(quartz_relative(level, total_sites, min_total_energy), 0.0_dp, valid_total)
+        delta_exp_low = merge(quartz_relative(level, total_sites, boltzmann_mean_low), 0.0_dp, valid_low)
+        delta_min_low = merge(quartz_relative(level, total_sites, min_low_energy), 0.0_dp, valid_low)
+        delta_exp_high = merge(quartz_relative(level, total_sites, boltzmann_mean_high), 0.0_dp, valid_high)
+        delta_min_high = merge(quartz_relative(level, total_sites, min_high_energy), 0.0_dp, valid_high)
+        delta_exp_mix = quartz_relative(level, total_sites, expected_mix)
+        accept_ratio = 1.0_dp
 
         do idx = 1, unique_count
             if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
@@ -675,21 +806,10 @@ contains
         call emit_side_statistics('lado Si', 'SI', level, best_count_si, best_energy_si, best_subsets_si, best_values_si, best_deg_si, total_sites, config, min_low_energy, mean_low_all, variance_low_all, entropy_low, has_low_data)
         call emit_side_statistics('lado Ge', 'GE', level, best_count_ge, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, total_sites, config, min_high_energy, mean_high_all, variance_high_all, entropy_high, has_high_data)
 
-        summary_filename = 'sod_boltzmann_exact.txt'
-        inquire(file=summary_filename, exist=summary_exists)
-        open(newunit=unit_summary, file=summary_filename, status='unknown', position='append', action='write', iostat=ios_summary)
-        if (ios_summary == 0) then
-            if (.not. summary_exists) then
-                write(unit_summary,'(A)') '#Nivel DeltaF_Si_300_kJmol DeltaF_Ge_300_kJmol Media_Si_eV Media_Ge_eV Min_Si_eV Min_Ge_eV Varianza_Si_eV2 Varianza_Ge_eV2 Degeneracion_total Configs_inequivalentes Entropia_total_eV_perK Entropia_Si_eV_perK Entropia_Ge_eV_perK TS_Si_300_eV F_Si_300_eV TS_Ge_300_eV F_Ge_300_eV TS_Si_800_eV F_Si_800_eV TS_Ge_800_eV F_Ge_800_eV TS_Si_1200_eV F_Si_1200_eV TS_Ge_1200_eV F_Ge_1200_eV'
-            end if
-            write(unit_summary,'(I6,1X,8F18.8,1X,I0,1X,I0,1X,3F18.8,1X,12F18.8)') &
-                level, deltaF_quartz_si, deltaF_quartz_ge, mean_low_all, mean_high_all, min_low_energy, min_high_energy, variance_low_all, variance_high_all, total_degeneracy_weight, unique_count, entropy_total, entropy_low, entropy_high, &
-                ts_low(1), free_energy_low(1), ts_high(1), free_energy_high(1), ts_low(2), free_energy_low(2), ts_high(2), free_energy_high(2), ts_low(3), free_energy_low(3), ts_high(3), free_energy_high(3)
-            close(unit_summary)
-        else
-            write(*,'(A,I0,A)') 'Aviso: no se pudo escribir resumen en txt (iostat=', ios_summary, ')'
-            call flush(output_unit)
-        end if
+        call append_normalized_summary('sod_boltzmann_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
+             boltzmann_variance_total, boltzmann_mean_low, min_low_energy, boltzmann_mean_high, min_high_energy, expected_mix, &
+             delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix, &
+             accept_ratio)
 
     deallocate(unique_subsets)
     deallocate(unique_low)
@@ -862,6 +982,116 @@ contains
         close(unit_outsod)
         close(unit_energy)
     end subroutine write_level_outputs
+
+    subroutine append_normalized_summary(filename, level, frac_ge, e_exp_total, e_min_total, var_total, e_exp_low, e_min_low, &
+            e_exp_high, e_min_high, e_exp_mix, delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, &
+            delta_min_high, delta_exp_mix, ratio)
+        implicit none
+        character(len=*), intent(in) :: filename
+        integer, intent(in) :: level
+        real(dp), intent(in) :: frac_ge, e_exp_total, e_min_total, var_total
+        real(dp), intent(in) :: e_exp_low, e_min_low, e_exp_high, e_min_high, e_exp_mix
+        real(dp), intent(in) :: delta_exp_total, delta_min_total, delta_exp_low, delta_min_low
+        real(dp), intent(in) :: delta_exp_high, delta_min_high, delta_exp_mix, ratio
+        logical :: summary_exists
+        integer :: unit_summary, ios
+        real(dp) :: frac_val, exp_total_val, min_total_val, var_total_val
+        real(dp) :: exp_low_val, min_low_val, exp_high_val, min_high_val
+        real(dp) :: exp_mix_val
+        real(dp) :: delta_exp_total_val, delta_min_total_val
+        real(dp) :: delta_exp_low_val, delta_min_low_val
+        real(dp) :: delta_exp_high_val, delta_min_high_val
+        real(dp) :: delta_exp_mix_val, ratio_val
+
+        frac_val = max(0.0_dp, min(1.0_dp, sanitize_value(frac_ge)))
+        exp_total_val = sanitize_value(e_exp_total)
+        min_total_val = sanitize_value(e_min_total)
+        var_total_val = max(0.0_dp, sanitize_value(var_total))
+        exp_low_val = sanitize_value(e_exp_low)
+        min_low_val = sanitize_value(e_min_low)
+        exp_high_val = sanitize_value(e_exp_high)
+        min_high_val = sanitize_value(e_min_high)
+        exp_mix_val = sanitize_value(e_exp_mix)
+        delta_exp_total_val = sanitize_value(delta_exp_total)
+        delta_min_total_val = sanitize_value(delta_min_total)
+        delta_exp_low_val = sanitize_value(delta_exp_low)
+        delta_min_low_val = sanitize_value(delta_min_low)
+        delta_exp_high_val = sanitize_value(delta_exp_high)
+        delta_min_high_val = sanitize_value(delta_min_high)
+        delta_exp_mix_val = sanitize_value(delta_exp_mix)
+        ratio_val = max(0.0_dp, min(1.0_dp, sanitize_value(ratio)))
+
+        inquire(file=filename, exist=summary_exists)
+        open(newunit=unit_summary, file=filename, status='unknown', position='append', action='write', iostat=ios)
+        if (ios /= 0) then
+            write(*,'(A)') 'Aviso: no se pudo escribir el resumen normalizado.'
+            call flush(output_unit)
+            return
+        end if
+
+        if (.not. summary_exists) then
+            write(unit_summary,'(A)') '#N FracGe E_exp_total E_min_total Var_total E_exp_ladoSi E_min_ladoSi E_exp_ladoGe E_min_ladoGe E_exp_combinada Delta_exp_total Delta_min_total Delta_exp_ladoSi Delta_min_ladoSi Delta_exp_ladoGe Delta_min_ladoGe Delta_exp_combinada Ratio_aceptacion'
+        end if
+
+        write(unit_summary,'(I0,1X,F7.4,16(1X,F12.6))') level, frac_val, exp_total_val, min_total_val, var_total_val, &
+            exp_low_val, min_low_val, exp_high_val, min_high_val, exp_mix_val, delta_exp_total_val, delta_min_total_val, &
+            delta_exp_low_val, delta_min_low_val, delta_exp_high_val, delta_min_high_val, delta_exp_mix_val, ratio_val
+
+        close(unit_summary)
+    end subroutine append_normalized_summary
+
+    pure real(dp) function sanitize_value(value) result(clean_val)
+        implicit none
+        real(dp), intent(in) :: value
+        real(dp), parameter :: limit = huge(1.0_dp) * 0.5_dp
+
+        if (abs(value) >= limit .or. value /= value) then
+            clean_val = 0.0_dp
+        else
+            clean_val = value
+        end if
+    end function sanitize_value
+
+    pure real(dp) function combined_energy_value(low_val, high_val, weight_low, weight_high) result(energy_val)
+        implicit none
+        real(dp), intent(in) :: low_val, high_val, weight_low, weight_high
+        real(dp), parameter :: limit = huge(1.0_dp) * 0.5_dp
+        logical :: has_low, has_high
+
+        has_low = (abs(low_val) < limit)
+        has_high = (abs(high_val) < limit)
+
+        if (has_low .and. has_high) then
+            energy_val = weight_low * low_val + weight_high * high_val
+        else if (has_low) then
+            energy_val = low_val
+        else if (has_high) then
+            energy_val = high_val
+        else
+            energy_val = limit
+        end if
+    end function combined_energy_value
+
+    pure real(dp) function mixing_weight(ge_fraction) result(weight)
+        implicit none
+        real(dp), intent(in) :: ge_fraction
+        real(dp) :: arg, numerator, denom_base, denominator
+        real(dp), parameter :: eps = 1.0e-8_dp
+
+        arg = (ge_fraction - mix_d0) / mix_x0
+        denom_base = 1.0_dp - arg
+        if (abs(denom_base) < eps) then
+            denom_base = merge(eps, -eps, denom_base >= 0.0_dp)
+        end if
+        denominator = denom_base**mix_m
+        numerator = 1.0_dp - arg**mix_n
+        if (abs(denominator) < eps) then
+            weight = merge(1.0_dp, 0.0_dp, numerator >= 0.0_dp)
+        else
+            weight = numerator / denominator
+        end if
+        weight = max(0.0_dp, min(1.0_dp, weight))
+    end function mixing_weight
 
     pure real(dp) function quartz_relative(level, total_sites, energy) result(rel_val)
         implicit none
@@ -1296,363 +1526,5 @@ contains
         end do
         ok = .true.
     end subroutine solve_normal_equations
-
-    subroutine calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_low_contrib, unique_high_contrib, unique_deg, unique_low, unique_high, config, do_low_calibration, do_high_calibration)
-        implicit none
-        integer, intent(in) :: level, total_sites, unique_count
-        integer, intent(in) :: unique_subsets(:,:)
-        real(dp), intent(in) :: unique_low_contrib(:,:), unique_high_contrib(:,:)
-        integer, intent(in) :: unique_deg(:)
-        real(dp), intent(inout) :: unique_low(:)
-        real(dp), intent(inout) :: unique_high(:)
-        integer, intent(inout) :: config(:)
-        logical, intent(in) :: do_low_calibration, do_high_calibration
-
-        integer, parameter :: n_orders = 4
-        integer, parameter :: n_targets = n_orders + 1
-        integer, parameter :: max_union = 2 * n_targets
-        real(dp), parameter :: huge_marker = huge(1.0_dp) * 0.5_dp
-        character(len=256) :: calib_dir, script_dir
-        character(len=64) :: base_name
-        character(len=16) :: level_tag
-        character(len=128) :: gout_names(max_union)
-        integer :: selected_low_idx(n_targets)
-        integer :: selected_high_idx(n_targets)
-        integer :: union_idx(max_union)
-        real(dp) :: measured_energy(max_union)
-        logical :: filled_union(max_union)
-        integer :: i, j, k, ios, unit_file, exit_code
-        integer :: union_count, pos_union
-        integer :: n_valid_high
-        integer :: idx_global
-        integer, allocatable :: valid_high_idx(:), tmp_selected(:)
-        real(dp), allocatable :: tmp_values(:)
-        logical :: ok_scripts, ok_low_selection, ok_high_selection, calibrate_high, ok_system, already
-        real(dp) :: base_energy_low, base_energy_high
-        real(dp) :: mat_low(n_orders, n_orders), rhs_low(n_orders), coeff_low(n_orders)
-        real(dp) :: mat_high(n_orders, n_orders), rhs_high(n_orders), coeff_high(n_orders)
-        real(dp) :: energy_val, corrected, contrib_j
-        character(len=512) :: command, line
-        character(len=256) :: gout_label
-        integer :: pos_hash, match_idx
-
-    if (unique_count < n_targets) return
-
-    if (.not. (do_low_calibration .and. do_high_calibration)) return
-
-        selected_low_idx = 0
-        selected_high_idx = 0
-
-        ok_scripts = find_scripts_directory(script_dir)
-        if (.not. ok_scripts) then
-            write(*,'(A,I0)') 'Aviso: no se encontro directorio de scripts GULP para el nivel ', level
-            return
-        end if
-
-        ok_low_selection = .false.
-        if (do_low_calibration) then
-            call select_calibration_indices(unique_low, unique_count, selected_low_idx, ok_low_selection)
-            if (.not. ok_low_selection) return
-        end if
-
-        allocate(valid_high_idx(unique_count))
-        n_valid_high = 0
-        do i = 1, unique_count
-            if (abs(unique_high(i)) < huge_marker) then
-                n_valid_high = n_valid_high + 1
-                valid_high_idx(n_valid_high) = i
-            end if
-        end do
-
-        calibrate_high = .false.
-        ok_high_selection = .false.
-        if (do_high_calibration .and. n_valid_high >= n_targets) then
-            allocate(tmp_values(n_valid_high))
-            allocate(tmp_selected(n_targets))
-            do i = 1, n_valid_high
-                tmp_values(i) = unique_high(valid_high_idx(i))
-            end do
-            call select_calibration_indices(tmp_values, n_valid_high, tmp_selected, ok_high_selection)
-            if (ok_high_selection) then
-                calibrate_high = .true.
-                do i = 1, n_targets
-                    selected_high_idx(i) = valid_high_idx(tmp_selected(i))
-                end do
-            end if
-            deallocate(tmp_values)
-            deallocate(tmp_selected)
-        end if
-        if (allocated(valid_high_idx)) deallocate(valid_high_idx)
-
-        write(level_tag,'(I4.4)') level
-        write(calib_dir,'("gulp_calib_N",A)') adjustl(level_tag)
-        calib_dir = trim(calib_dir)
-
-        union_idx = 0
-        union_count = 0
-        if (do_low_calibration) then
-            do i = 1, n_targets
-                idx_global = selected_low_idx(i)
-                if (idx_global <= 0) cycle
-                already = .false.
-                do j = 1, union_count
-                    if (union_idx(j) == idx_global) then
-                        already = .true.
-                        exit
-                    end if
-                end do
-                if (.not. already) then
-                    if (union_count >= max_union) then
-                        write(*,'(A,I0)') 'Aviso: capacidad insuficiente para union de calibracion en nivel ', level
-                        return
-                    end if
-                    union_count = union_count + 1
-                    union_idx(union_count) = idx_global
-                end if
-            end do
-        end if
-        if (calibrate_high) then
-            do i = 1, n_targets
-                idx_global = selected_high_idx(i)
-                if (idx_global <= 0) cycle
-                already = .false.
-                do j = 1, union_count
-                    if (union_idx(j) == idx_global) then
-                        already = .true.
-                        exit
-                    end if
-                end do
-                if (.not. already) then
-                    if (union_count >= max_union) then
-                        write(*,'(A,I0)') 'Aviso: capacidad insuficiente para union de calibracion en nivel ', level
-                        return
-                    end if
-                    union_count = union_count + 1
-                    union_idx(union_count) = idx_global
-                end if
-            end do
-        end if
-
-        if (union_count == 0) return
-
-        call execute_command_line('rm -rf ' // trim(calib_dir), exitstat=exit_code)
-        call execute_command_line('mkdir -p ' // trim(calib_dir), exitstat=exit_code)
-
-        gout_names = ''
-        measured_energy = 0.0_dp
-        filled_union = .false.
-
-        do i = 1, union_count
-            config = 1
-            if (level > 0) config(unique_subsets(1:level, union_idx(i))) = 2
-            write(base_name,'("calib_N",I4.4,"_c",I2.2)') level, i
-            call write_vasp_file(config, total_sites, trim(calib_dir)//'/'//trim(base_name)//'.vasp')
-            gout_names(i) = trim(base_name)//'.vasp.gout'
-        end do
-
-        call copy_calibration_scripts(script_dir, calib_dir)
-
-        command = 'cd ' // trim(calib_dir) // ' && bash run_jobs.sh'
-        call execute_command_line(trim(command), exitstat=exit_code)
-        if (exit_code /= 0) then
-            write(*,'(A,I0)') 'Aviso: fallo run_jobs.sh durante calibracion en nivel ', level
-            return
-        end if
-
-        command = 'cd ' // trim(calib_dir) // ' && bash extract.sh'
-        call execute_command_line(trim(command), exitstat=exit_code)
-        if (exit_code /= 0) then
-            write(*,'(A,I0)') 'Aviso: fallo extract.sh durante calibracion en nivel ', level
-            return
-        end if
-
-        open(newunit=unit_file, file=trim(calib_dir)//'/ENERGIES', status='old', action='read', iostat=ios)
-        if (ios /= 0) then
-            write(*,'(A,I0)') 'Aviso: no se pudo leer ENERGIES para el nivel ', level
-            return
-        end if
-
-        do
-            read(unit_file,'(A)',iostat=ios) line
-            if (ios /= 0) exit
-            if (len_trim(line) == 0) cycle
-            pos_hash = index(line, '#')
-            if (pos_hash <= 0) cycle
-            read(line(1:pos_hash-1),*,iostat=ios) energy_val
-            if (ios /= 0) cycle
-            gout_label = adjustl(trim(line(pos_hash+1:)))
-            gout_label = trim(gout_label)
-            match_idx = 0
-            do i = 1, union_count
-                if (trim(gout_label) == trim(gout_names(i))) then
-                    match_idx = i
-                    exit
-                end if
-            end do
-            if (match_idx > 0) then
-                measured_energy(match_idx) = energy_val
-                filled_union(match_idx) = .true.
-            end if
-        end do
-        close(unit_file)
-
-        do i = 1, union_count
-            if (.not. filled_union(i)) then
-                write(*,'(A,I0)') 'Aviso: energias incompletas en calibracion del nivel ', level
-                return
-            end if
-        end do
-
-        if (do_low_calibration) then
-            base_energy_low = get_base_energy()
-            mat_low = 0.0_dp
-            rhs_low = 0.0_dp
-            do i = 1, n_targets
-                idx_global = selected_low_idx(i)
-                if (idx_global <= 0) cycle
-                pos_union = 0
-                do j = 1, union_count
-                    if (union_idx(j) == idx_global) then
-                        pos_union = j
-                        exit
-                    end if
-                end do
-                if (pos_union == 0) cycle
-                energy_val = measured_energy(pos_union)
-                do j = 1, n_orders
-                    contrib_j = unique_low_contrib(j, idx_global)
-                    rhs_low(j) = rhs_low(j) + contrib_j * (energy_val - base_energy_low)
-                    do k = 1, n_orders
-                        mat_low(j,k) = mat_low(j,k) + contrib_j * unique_low_contrib(k, idx_global)
-                    end do
-                end do
-            end do
-
-            call solve_normal_equations(mat_low, rhs_low, coeff_low, ok_system)
-            if (.not. ok_system) then
-                write(*,'(A,I0)') 'Aviso: sistema singular en calibracion (lado Si) del nivel ', level
-                return
-            end if
-        end if
-
-        coeff_high = 0.0_dp
-        if (calibrate_high) then
-            base_energy_high = get_high_base_energy()
-            mat_high = 0.0_dp
-            rhs_high = 0.0_dp
-            do i = 1, n_targets
-                idx_global = selected_high_idx(i)
-                if (idx_global <= 0) cycle
-                pos_union = 0
-                do j = 1, union_count
-                    if (union_idx(j) == idx_global) then
-                        pos_union = j
-                        exit
-                    end if
-                end do
-                if (pos_union == 0) cycle
-                energy_val = measured_energy(pos_union)
-                do j = 1, n_orders
-                    contrib_j = unique_high_contrib(j, idx_global)
-                    rhs_high(j) = rhs_high(j) + contrib_j * (energy_val - base_energy_high)
-                    do k = 1, n_orders
-                        mat_high(j,k) = mat_high(j,k) + contrib_j * unique_high_contrib(k, idx_global)
-                    end do
-                end do
-            end do
-
-            call solve_normal_equations(mat_high, rhs_high, coeff_high, ok_system)
-            if (.not. ok_system) then
-                write(*,'(A,I0)') 'Aviso: sistema singular en calibracion (lado Ge) del nivel ', level
-                calibrate_high = .false.
-            end if
-        end if
-
-        if (do_low_calibration) then
-            do i = 1, unique_count
-                corrected = base_energy_low + sum(coeff_low(:) * unique_low_contrib(:, i))
-                unique_low(i) = corrected
-            end do
-        end if
-
-        if (calibrate_high) then
-            do i = 1, unique_count
-                corrected = base_energy_high + sum(coeff_high(:) * unique_high_contrib(:, i))
-                unique_high(i) = corrected
-            end do
-        end if
-
-        do i = 1, union_count
-            idx_global = union_idx(i)
-            energy_val = measured_energy(i)
-            unique_low(idx_global) = energy_val
-            unique_high(idx_global) = energy_val
-        end do
-    end subroutine calibrate_level_with_gulp
-
-    subroutine canonicalize_subset(subset, level, eqmatrix, nop, canonical)
-        implicit none
-        integer, intent(in) :: subset(:)
-        integer, intent(in) :: level, nop
-        integer, intent(in) :: eqmatrix(:,:)
-        integer, intent(out) :: canonical(:)
-        integer :: temp(level)
-        integer :: op
-
-        canonical(1:level) = subset(1:level)
-        call sort_int_ascending(canonical, level)
-
-        do op = 1, nop
-            temp(1:level) = eqmatrix(op, subset(1:level))
-            call sort_int_ascending(temp, level)
-            if (lexicographically_less(temp, canonical, level)) then
-                canonical(1:level) = temp(1:level)
-            end if
-        end do
-    end subroutine canonicalize_subset
-
-    ! Compares two integer arrays of length 'level' and returns .true. if array 'a' is lexicographically less than array 'b'.
-    ! Inputs: a(:), b(:) - integer arrays; level - number of elements to compare.
-    ! Output: logical - .true. if a < b lexicographically, .false. otherwise.
-    pure logical function lexicographically_less(a, b, level)
-        implicit none
-        integer, intent(in) :: a(:), b(:)
-        integer, intent(in) :: level
-        integer :: i
-        do i = 1, level
-            if (a(i) < b(i)) then
-                lexicographically_less = .true.
-                return
-            else if (a(i) > b(i)) then
-                lexicographically_less = .false.
-                return
-            end if
-        end do
-        lexicographically_less = .false.
-    end function lexicographically_less
-
-    pure integer function find_subset_index(subset, level, stored_subsets, stored_count)
-        implicit none
-        integer, intent(in) :: subset(:)
-        integer, intent(in) :: level, stored_count
-        integer, intent(in) :: stored_subsets(:,:)
-        integer :: idx, j
-        logical :: match
-
-        find_subset_index = 0
-        do idx = 1, stored_count
-            match = .true.
-            do j = 1, level
-                if (stored_subsets(j, idx) /= subset(j)) then
-                    match = .false.
-                    exit
-                end if
-            end do
-            if (match) then
-                find_subset_index = idx
-                return
-            end if
-        end do
-    end function find_subset_index
 
 end program sod_boltzmann_exact

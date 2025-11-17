@@ -14,9 +14,10 @@ all:
 	$(f90comp) $(FFLAGS) -o bin/peaks2spec src/peaks2spec.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/energy_calc.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_boltzmann_base.f90
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_calibration.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_boltzmann_mc.f90
-	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_mc sod_boltzmann_mc.o sod_boltzmann_base.o energy_calc.o
-	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_exact src/sod_boltzmann_exact.f90 sod_boltzmann_base.o energy_calc.o
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_mc sod_boltzmann_mc.o sod_calibration.o sod_boltzmann_base.o energy_calc.o
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_exact src/sod_boltzmann_exact.f90 sod_calibration.o sod_boltzmann_base.o energy_calc.o
 #	$(f90comp) -c src/mc_sampler.f90
 #	$(f90comp) -o bin/sod_mc energy_calc.o mc_sampler.o src/sod_mc.f90
 	rm -f *.o *.mod
@@ -24,14 +25,16 @@ all:
 sod_boltzmann_mc: src/sod_boltzmann_mc.f90 src/sod_boltzmann_base.f90 src/energy_calc.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/energy_calc.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_boltzmann_base.f90
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_calibration.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_boltzmann_mc.f90
-	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_mc sod_boltzmann_mc.o sod_boltzmann_base.o energy_calc.o
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_mc sod_boltzmann_mc.o sod_calibration.o sod_boltzmann_base.o energy_calc.o
 	rm -f *.o *.mod
 
 sod_boltzmann_exact: src/sod_boltzmann_exact.f90 src/sod_boltzmann_mc.f90 src/energy_calc.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/energy_calc.f90
 	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_boltzmann_base.f90
-	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_exact src/sod_boltzmann_exact.f90 sod_boltzmann_base.o energy_calc.o
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -c src/sod_calibration.f90
+	$(f90comp) $(FFLAGS) $(OMPFLAGS) -o bin/sod_boltzmann_exact src/sod_boltzmann_exact.f90 sod_calibration.o sod_boltzmann_base.o energy_calc.o
 	rm -f *.o *.mod
 
 clean:
