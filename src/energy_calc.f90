@@ -1484,15 +1484,24 @@ MODULE energy_calc
         ! Try all symmetry operations; OpenMP distributes operations when available
         !$omp parallel default(shared) private(op, energy_tmp, energy_high_tmp, i, j, k, l, mapped_i, mapped_j, mapped_k, mapped_l, ii, jj, kk, idx, arr4, &
         !$omp&     min_energy_low_thread, min_energy_high_thread, best_low_contrib_thread, best_high_contrib_thread, low_contrib_local, high_contrib_local, &
-        !$omp&     ge_map_buf_local, si_map_buf_local)
+        !$omp&     ge_map_buf_local, si_map_buf_local, ge_map_alloc, si_map_alloc)
 
             min_energy_low_thread = huge_val
             min_energy_high_thread = huge_val
             best_low_contrib_thread = 0.0_dp
             best_high_contrib_thread = 0.0_dp
 
-            IF (nge > 0) ALLOCATE(ge_map_buf_local(nge))
-            IF (can_use_high .AND. nsi > 0) ALLOCATE(si_map_buf_local(nsi))
+            ge_map_alloc = .false.
+            si_map_alloc = .false.
+
+            IF (nge > 0) THEN
+                ALLOCATE(ge_map_buf_local(nge))
+                ge_map_alloc = .true.
+            END IF
+            IF (can_use_high .AND. nsi > 0) THEN
+                ALLOCATE(si_map_buf_local(nsi))
+                si_map_alloc = .true.
+            END IF
 
             !$omp do schedule(static)
             DO op = 1, nop
@@ -1663,8 +1672,8 @@ MODULE energy_calc
             END DO
             !$omp end do
 
-            IF (ALLOCATED(ge_map_buf_local)) DEALLOCATE(ge_map_buf_local)
-            IF (ALLOCATED(si_map_buf_local)) DEALLOCATE(si_map_buf_local)
+            IF (ge_map_alloc) DEALLOCATE(ge_map_buf_local)
+            IF (si_map_alloc) DEALLOCATE(si_map_buf_local)
 
             !$omp critical
                 IF (min_energy_low_thread < min_energy_low) THEN

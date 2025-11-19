@@ -22,7 +22,9 @@ ase_candidates=(
 
 # Write the minimal RASPA input files used to translate the CIF back into a relaxed structure.
 raspa_input_file() {
-	cat >pseudo_atoms.def <<'EOF'
+	local target_dir="$1"
+
+	cat >"${target_dir}/pseudo_atoms.def" <<'EOF'
 #number of pseudo atoms
 5
 #type      print   as    chem  oxidation   mass        charge   polarization B-factor radii  connectivity anisotropic anisotropic-type   tinker-type
@@ -33,7 +35,7 @@ Si         yes     Si    Si    0           28.0855     0.0      0.0          1.0
 Ge         yes     Ge    Ge    0           26.981539   0.0      0.0          1.0      1.18   4            0           absolute           0
 EOF
 
-	cat >simulation.input <<'EOF'
+	cat >"${target_dir}/simulation.input" <<'EOF'
 SimulationType                MC
 NumberOfCycles                0
 NumberOfInitializationCycles  0
@@ -85,45 +87,60 @@ run_ase_convert() {
 # Run RASPA's "simulate" binary to relax the CIF and emit a final structure compatible with GULP.
 run_raspa_convert() {
 	local structure="$1"
-	local dir
-	local base
-	local log_file
+	local workdir="$2"
 	local output_cif
+	local log_file
 
 	if ! command -v simulate >/dev/null 2>&1; then
 		echo "Error: no se encontró el binario simulate en PATH" >&2
 		return 1
 	fi
 
-	dir=$(dirname "$structure")
-	base=$(basename "$structure")
-	log_file="$dir/${base}.simulate.log"
 	output_cif="Movies/System_0/Framework_0_final_1_1_1_P1.cif"
+	log_file="simulate.log"
 
 	echo "Calculando la energía de ${structure} con simulate..."
-	if ! simulate >"$log_file" 2>&1; then
-		echo "Error: simulate falló para ${structure}. Revisa $log_file" >&2
-		return 1
-	fi
+	(
+		cd "$workdir"
+		if ! simulate >"$log_file" 2>&1; then
+			echo "Error: simulate falló para ${structure}. Revisa ${workdir}/${log_file}" >&2
+			exit 1
+		fi
+	) || return 1
 
-	if [ ! -f "$output_cif" ]; then
+	if [ ! -f "${workdir}/${output_cif}" ]; then
 		echo "Error: simulate no generó $output_cif" >&2
 		return 1
 	fi
 
-	cp "$output_cif" "${structure}.cif"
-	rm -f "$log_file"
-	rm -f Local.cif pseudo_atoms.def simulation.input
-	rm -rf Movies Restart Output VTK
+	cp "${workdir}/${output_cif}" "${structure}.cif"
+	rm -f "${workdir}/${log_file}"
+	rm -f "${workdir}/Local.cif" "${workdir}/pseudo_atoms.def" "${workdir}/simulation.input"
+	rm -rf "${workdir}/Movies" "${workdir}/Restart" "${workdir}/Output" "${workdir}/VTK"
 	return 0
 }
 
 # Main conversion pipeline: build auxiliary input, call ASE/RASPA, and emit the final *.gin package.
-raspa_input_file
-rm -f Local.cif
-run_ase_convert "$file" Local.cif
-sed -i -e 's/_space_group_IT_number/_symmetry_Int_Tables_number/g' -e '/space_group_name_H-M_alt/d' Local.cif
-run_raspa_convert "$file"
+workspace=""
+file_dir=$(dirname "$file")
+workspace=$(mktemp -d "${file_dir}/vasp2gin_tmp.XXXXXX")
+cleanup_workspace() {
+	local status="$1"
+	if [ -n "$workspace" ] && [ -d "$workspace" ]; then
+		if [ "$status" -eq 0 ]; then
+			rm -rf "$workspace"
+		else
+			echo "Aviso: se mantiene el directorio temporal para depuración: $workspace" >&2
+		fi
+	fi
+}
+trap 'cleanup_workspace $?' EXIT
+
+raspa_input_file "$workspace"
+rm -f "${workspace}/Local.cif"
+run_ase_convert "$file" "${workspace}/Local.cif"
+sed -i -e 's/_space_group_IT_number/_symmetry_Int_Tables_number/g' -e '/space_group_name_H-M_alt/d' "${workspace}/Local.cif"
+run_raspa_convert "$file" "$workspace"
 
 cif_path="${file}.cif"
 
