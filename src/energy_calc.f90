@@ -1433,7 +1433,8 @@ MODULE energy_calc
         REAL(dp) :: huge_val
         INTEGER :: nge, nsi
         INTEGER :: nge_counter, nsi_counter
-        LOGICAL :: can_use_high
+    LOGICAL :: can_use_high
+    LOGICAL :: ge_map_alloc, si_map_alloc
         REAL(dp) :: x_ge, w_low, w_high, mix_beta
         REAL(dp) :: best_low_contrib(4), best_high_contrib(4)
         REAL(dp) :: low_contrib_local(4), high_contrib_local(4)
