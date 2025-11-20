@@ -11,6 +11,7 @@
 !******************************************************************************
 
 MODULE energy_calc
+    USE omp_lib, ONLY: omp_in_parallel
     IMPLICIT NONE
     PRIVATE
     PUBLIC :: calculate_structure_energy, init_energy_calc, cleanup_energy_calc, write_vasp_file, write_eqmatrix_file, get_eqmatrix, get_base_energy, get_high_base_energy, get_max_low_order, get_max_high_order
@@ -1435,6 +1436,7 @@ MODULE energy_calc
         INTEGER :: nge_counter, nsi_counter
     LOGICAL :: can_use_high
     LOGICAL :: ge_map_alloc, si_map_alloc
+    LOGICAL :: allow_parallel
         REAL(dp) :: x_ge, w_low, w_high, mix_beta
         REAL(dp) :: best_low_contrib(4), best_high_contrib(4)
         REAL(dp) :: low_contrib_local(4), high_contrib_local(4)
@@ -1479,11 +1481,13 @@ MODULE energy_calc
             END DO
         END IF
 
-        can_use_high = high_base_loaded
-        IF (nsi > 0 .AND. .NOT. ALLOCATED(hE1)) can_use_high = .FALSE.
+    can_use_high = high_base_loaded
+    IF (nsi > 0 .AND. .NOT. ALLOCATED(hE1)) can_use_high = .FALSE.
 
-        ! Try all symmetry operations; OpenMP distributes operations when available
-        !$omp parallel default(shared) private(op, energy_tmp, energy_high_tmp, i, j, k, l, mapped_i, mapped_j, mapped_k, mapped_l, ii, jj, kk, idx, arr4, &
+    allow_parallel = .NOT. omp_in_parallel()
+
+    ! Try all symmetry operations; OpenMP distributes operations when available
+    !$omp parallel if (allow_parallel) default(shared) private(op, energy_tmp, energy_high_tmp, i, j, k, l, mapped_i, mapped_j, mapped_k, mapped_l, ii, jj, kk, idx, arr4, &
         !$omp&     min_energy_low_thread, min_energy_high_thread, best_low_contrib_thread, best_high_contrib_thread, low_contrib_local, high_contrib_local, &
         !$omp&     ge_map_buf_local, si_map_buf_local, ge_map_alloc, si_map_alloc)
 
