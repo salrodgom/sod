@@ -1487,9 +1487,12 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
     allow_parallel = .NOT. omp_in_parallel()
     
     ! Try all symmetry operations; OpenMP distributes operations when available
-    !$omp parallel if (allow_parallel) default(shared) private(op, energy_tmp, energy_high_tmp, i, j, k, l, mapped_i, mapped_j) &
-    !$omp&     private(mapped_k, mapped_l, ii, jj, kk, idx, arr4, min_energy_low_thread, min_energy_high_thread) &
-    !$omp&     private(best_low_contrib_thread, best_high_contrib_thread, low_contrib_local, high_contrib_local) &
+    !$omp parallel if (allow_parallel) default(shared) &
+    !$omp&     private(op, energy_tmp, energy_high_tmp, i, j, k, l) &
+    !$omp&     private(mapped_i, mapped_j, mapped_k, mapped_l, ii, jj, kk, idx) &
+    !$omp&     private(arr4, min_energy_low_thread, min_energy_high_thread) &
+    !$omp&     private(best_low_contrib_thread, best_high_contrib_thread) &
+    !$omp&     private(low_contrib_local, high_contrib_local) &
     !$omp&     private(ge_map_buf_local, si_map_buf_local, ge_map_alloc, si_map_alloc)
     
     min_energy_low_thread = huge_val
