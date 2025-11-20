@@ -15,6 +15,7 @@ program sod_boltzmann_mc
     use sod_boltzmann_utils
     use sod_calibration
     use energy_calc
+    use omp_lib, only: omp_in_parallel
     use, intrinsic :: iso_fortran_env, only: output_unit
     implicit none
 
@@ -655,7 +656,7 @@ contains
     real(dp), allocatable :: gulp_energies(:)
         logical :: gulp_success
     real(dp) :: sum_energy, sumsq_energy, mean_energy, variance_energy, std_energy
-    logical :: cap_reduced
+    logical :: cap_reduced, allow_inner_parallel
     integer :: idx
 
         if (level == 0) then
@@ -771,7 +772,12 @@ contains
         end if
 
         if (unique_count > 0) then
-            if (use_parallel) then
+            allow_inner_parallel = use_parallel
+            if (allow_inner_parallel) then
+                if (omp_in_parallel()) allow_inner_parallel = .false.
+            end if
+
+            if (allow_inner_parallel) then
 !$omp parallel default(shared) private(idx, low_contrib_tmp, high_contrib_tmp, config_local)
                 allocate(config_local(total_sites))
                 config_local = 1
@@ -798,7 +804,6 @@ contains
                     low_contribs(:, idx) = low_contrib_tmp
                     high_contribs(:, idx) = high_contrib_tmp
                 end do
-                config = 1
             end if
 
             if (trace_unit /= 0) then
