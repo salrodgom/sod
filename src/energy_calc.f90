@@ -70,6 +70,13 @@ MODULE energy_calc
     INTEGER, ALLOCATABLE, PRIVATE :: spat1(:)        ! Species index per atom in unit cell (deduped)
     INTEGER, ALLOCATABLE, PRIVATE :: pos2coord(:)    ! Mapping: position index (1:npos) -> coords index
     INTEGER, PRIVATE :: natsp1(2)                    ! Number of atoms per species in unit cell
+
+    ! Diagnostics for bounds checking
+    LOGICAL, PRIVATE :: bounds_error = .FALSE.
+    INTEGER, PRIVATE :: bounds_error_code = 0
+    INTEGER, PRIVATE :: bounds_error_index = 0
+    INTEGER, PRIVATE :: bounds_error_value = 0
+    INTEGER, PRIVATE :: bounds_error_limit = 0
     
 CONTAINS
     
@@ -122,6 +129,12 @@ CONTAINS
         IF (ALLOCATED(hE4_l)) DEALLOCATE(hE4_l)
         IF (ALLOCATED(hE4_val)) DEALLOCATE(hE4_val)
         
+        bounds_error = .FALSE.
+        bounds_error_code = 0
+        bounds_error_index = 0
+        bounds_error_value = 0
+        bounds_error_limit = 0
+
         WRITE(*,*) 'init_energy_calc: start'
         ! Read SGO file first to get symmetry operations
         OPEN(UNIT=21, FILE='SGO', STATUS='OLD', IOSTAT=io_stat)
@@ -920,6 +933,11 @@ CONTAINS
             END IF
         END IF
     END IF
+
+    IF (bounds_error) THEN
+        CALL report_bounds_error()
+        STOP 1
+    END IF
 END IF
 
 ! Clean up temporary arrays
@@ -1486,6 +1504,12 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
     IF (nsi > 0 .AND. .NOT. ALLOCATED(hE1)) can_use_high = .FALSE.
     
     allow_parallel = .NOT. omp_in_parallel()
+
+    bounds_error = .FALSE.
+    bounds_error_code = 0
+    bounds_error_index = 0
+    bounds_error_value = 0
+    bounds_error_limit = 0
     
     ! Try all symmetry operations; OpenMP distributes operations when available
     IF (allow_parallel) THEN
@@ -1510,8 +1534,13 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
 
             !$omp do schedule(static)
             DO op = 1, nop
+                !$omp flush(bounds_error)
+                IF (bounds_error) CYCLE
                 CALL evaluate_symmetry_op(op, ge_map_buf_local, si_map_buf_local, energy_tmp, low_contrib_local, &
                     energy_high_tmp, high_contrib_local)
+
+                !$omp flush(bounds_error)
+                IF (bounds_error) CYCLE
 
                 IF (energy_tmp < min_energy_low_thread) THEN
                     min_energy_low_thread = energy_tmp
@@ -1554,8 +1583,11 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
         ALLOCATE(si_map_buf_local(MAX(1, nsi)))
 
         DO op = 1, nop
+            IF (bounds_error) EXIT
             CALL evaluate_symmetry_op(op, ge_map_buf_local, si_map_buf_local, energy_tmp, low_contrib_local, &
                 energy_high_tmp, high_contrib_local)
+
+            IF (bounds_error) EXIT
 
             IF (energy_tmp < min_energy_low_thread) THEN
                 min_energy_low_thread = energy_tmp
@@ -1585,6 +1617,11 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
 
 IF (ALLOCATED(ge_pos_buf)) DEALLOCATE(ge_pos_buf)
 IF (ALLOCATED(si_pos_buf)) DEALLOCATE(si_pos_buf)
+
+IF (bounds_error) THEN
+    CALL report_bounds_error()
+    STOP 1
+END IF
 
 IF (.NOT. can_use_high .OR. min_energy_high >= huge_val) THEN
     energy = min_energy_low
@@ -1639,21 +1676,32 @@ CONTAINS
         INTEGER :: idx_local
         INTEGER :: arr4_local(4)
 
+        !$omp flush(bounds_error)
+        IF (bounds_error) THEN
+            energy_tmp = huge_val
+            energy_high_tmp = huge_val
+            RETURN
+        END IF
+
         energy_tmp = E0
         low_contrib_local = 0.0_dp
 
         IF (nge > 0) THEN
             DO i = 1, nge
                 IF (ge_pos_buf(i) < 1 .OR. ge_pos_buf(i) > SIZE(eqmatrix, 2)) THEN
-                    WRITE(error_unit,'(A,3I10)') 'Error: ge_pos_buf fuera de rango:', i, ge_pos_buf(i), SIZE(eqmatrix,2)
-                    STOP 98
+                    CALL record_bounds_error(1, i, ge_pos_buf(i), SIZE(eqmatrix, 2))
+                    energy_tmp = huge_val
+                    energy_high_tmp = huge_val
+                    RETURN
                 END IF
             END DO
             DO i = 1, nge
                 ge_map_buf_local(i) = eqmatrix(op_idx, ge_pos_buf(i))
                 IF (ge_map_buf_local(i) < 1 .OR. ge_map_buf_local(i) > SIZE(dE1)) THEN
-                    WRITE(error_unit,'(A,3I10)') 'Error: ge_map_buf_local fuera de rango:', i, ge_map_buf_local(i), SIZE(dE1)
-                    STOP 99
+                    CALL record_bounds_error(2, i, ge_map_buf_local(i), SIZE(dE1))
+                    energy_tmp = huge_val
+                    energy_high_tmp = huge_val
+                    RETURN
                 END IF
                 low_contrib_local(1) = low_contrib_local(1) + dE1(ge_map_buf_local(i))
                 energy_tmp = energy_tmp + dE1(ge_map_buf_local(i))
@@ -1733,15 +1781,19 @@ CONTAINS
             IF (nsi > 0) THEN
                 DO i = 1, nsi
                     IF (si_pos_buf(i) < 1 .OR. si_pos_buf(i) > SIZE(eqmatrix, 2)) THEN
-                        WRITE(error_unit,'(A,3I10)') 'Error: si_pos_buf fuera de rango:', i, si_pos_buf(i), SIZE(eqmatrix,2)
-                        STOP 97
+                        CALL record_bounds_error(3, i, si_pos_buf(i), SIZE(eqmatrix, 2))
+                        energy_tmp = huge_val
+                        energy_high_tmp = huge_val
+                        RETURN
                     END IF
                 END DO
                 DO i = 1, nsi
                     si_map_buf_local(i) = eqmatrix(op_idx, si_pos_buf(i))
                     IF (si_map_buf_local(i) < 1 .OR. si_map_buf_local(i) > SIZE(hE1)) THEN
-                        WRITE(error_unit,'(A,3I10)') 'Error: si_map_buf_local fuera de rango:', i, si_map_buf_local(i), SIZE(hE1)
-                        STOP 96
+                        CALL record_bounds_error(4, i, si_map_buf_local(i), SIZE(hE1))
+                        energy_tmp = huge_val
+                        energy_high_tmp = huge_val
+                        RETURN
                     END IF
                 END DO
             END IF
@@ -1955,6 +2007,46 @@ SUBROUTINE write_vasp_file(config, n_sites, filename)
     CLOSE(30)
     IF (ALLOCATED(is_sub)) DEALLOCATE(is_sub)
 END SUBROUTINE write_vasp_file
+
+SUBROUTINE record_bounds_error(code, idx, value, limit)
+    IMPLICIT NONE
+    INTEGER, INTENT(IN) :: code, idx, value, limit
+
+!$omp critical(bounds_error_rec)
+    IF (.NOT. bounds_error) THEN
+        bounds_error = .TRUE.
+        bounds_error_code = code
+        bounds_error_index = idx
+        bounds_error_value = value
+        bounds_error_limit = limit
+    END IF
+!$omp end critical(bounds_error_rec)
+!$omp flush(bounds_error, bounds_error_code, bounds_error_index, bounds_error_value, bounds_error_limit)
+END SUBROUTINE record_bounds_error
+
+SUBROUTINE report_bounds_error()
+    IMPLICIT NONE
+    CHARACTER(len=32) :: label
+
+    SELECT CASE (bounds_error_code)
+    CASE (1)
+        label = 'ge_pos_buf'
+    CASE (2)
+        label = 'ge_map_buf_local'
+    CASE (3)
+        label = 'si_pos_buf'
+    CASE (4)
+        label = 'si_map_buf_local'
+    CASE DEFAULT
+        label = 'valor desconocido'
+    END SELECT
+
+    WRITE(error_unit,'(A)') 'Error: índice fuera de rango en '//TRIM(label)//'.'
+    WRITE(error_unit,'(A,I0)') '  posición del vector: ', bounds_error_index
+    WRITE(error_unit,'(A,I0)') '  valor solicitado: ', bounds_error_value
+    WRITE(error_unit,'(A,I0)') '  límite válido: ', bounds_error_limit
+    CALL FLUSH(error_unit)
+END SUBROUTINE report_bounds_error
 
 SUBROUTINE write_eqmatrix_file(fname)
     IMPLICIT NONE

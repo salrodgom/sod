@@ -193,7 +193,8 @@ O3 shel  O3 shel
 end
 library Germanate
 switch_minimiser rfo gnorm 0.05
-stepmx opt 0.1
+stepmx opt 0.05
+cuts 1.0
 dump every 1 $file.grs
 output cif $file.cif
 EOF
