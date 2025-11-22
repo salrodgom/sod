@@ -12,6 +12,7 @@
 
 MODULE energy_calc
     USE omp_lib, ONLY: omp_in_parallel
+    USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
     IMPLICIT NONE
     PRIVATE
     PUBLIC :: calculate_structure_energy, init_energy_calc, cleanup_energy_calc, write_vasp_file, write_eqmatrix_file, get_eqmatrix, get_base_energy, get_high_base_energy, get_max_low_order, get_max_high_order
@@ -1643,7 +1644,17 @@ CONTAINS
 
         IF (nge > 0) THEN
             DO i = 1, nge
+                IF (ge_pos_buf(i) < 1 .OR. ge_pos_buf(i) > SIZE(eqmatrix, 2)) THEN
+                    WRITE(error_unit,'(A,3I10)') 'Error: ge_pos_buf fuera de rango:', i, ge_pos_buf(i), SIZE(eqmatrix,2)
+                    STOP 98
+                END IF
+            END DO
+            DO i = 1, nge
                 ge_map_buf_local(i) = eqmatrix(op_idx, ge_pos_buf(i))
+                IF (ge_map_buf_local(i) < 1 .OR. ge_map_buf_local(i) > SIZE(dE1)) THEN
+                    WRITE(error_unit,'(A,3I10)') 'Error: ge_map_buf_local fuera de rango:', i, ge_map_buf_local(i), SIZE(dE1)
+                    STOP 99
+                END IF
                 low_contrib_local(1) = low_contrib_local(1) + dE1(ge_map_buf_local(i))
                 energy_tmp = energy_tmp + dE1(ge_map_buf_local(i))
             END DO
@@ -1721,7 +1732,17 @@ CONTAINS
 
             IF (nsi > 0) THEN
                 DO i = 1, nsi
+                    IF (si_pos_buf(i) < 1 .OR. si_pos_buf(i) > SIZE(eqmatrix, 2)) THEN
+                        WRITE(error_unit,'(A,3I10)') 'Error: si_pos_buf fuera de rango:', i, si_pos_buf(i), SIZE(eqmatrix,2)
+                        STOP 97
+                    END IF
+                END DO
+                DO i = 1, nsi
                     si_map_buf_local(i) = eqmatrix(op_idx, si_pos_buf(i))
+                    IF (si_map_buf_local(i) < 1 .OR. si_map_buf_local(i) > SIZE(hE1)) THEN
+                        WRITE(error_unit,'(A,3I10)') 'Error: si_map_buf_local fuera de rango:', i, si_map_buf_local(i), SIZE(hE1)
+                        STOP 96
+                    END IF
                 END DO
             END IF
 
