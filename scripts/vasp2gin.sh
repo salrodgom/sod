@@ -167,7 +167,7 @@ fi
 gin_path="${file}.gin"
 
 cat >"$gin_path" <<EOF
-opti conp prop
+opti conp
 name $file
 cell
  $cell1 $cell2 $cell3 $cell4 $cell5 $cell6
@@ -192,7 +192,7 @@ O2 shel  O2 shel
 O3 shel  O3 shel
 end
 library Germanate
-switch_minimiser rfo gnorm 0.05
+switch_minimiser rfo gnorm 0.01
 stepmx opt 0.05
 cuts 1.0
 dump every 1 $file.grs
