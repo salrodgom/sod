@@ -10,6 +10,8 @@
 !
 !******************************************************************************
 
+! Monte Carlo driver that samples substitution levels, calls the SOD energy
+! calculator, and aggregates Boltzmann-weighted statistics per level.
 program sod_boltzmann_mc
     use sod_boltzmann_consts
     use sod_boltzmann_utils

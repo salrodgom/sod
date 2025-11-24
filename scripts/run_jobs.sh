@@ -1,7 +1,21 @@
 #!/bin/bash
-# Orchestrates GULP single-point jobs for the VASP structures in the current directory.
+#*******************************************************************************
+#    Copyright (c) 2025, Salvador R.G. Balestra
+#
+#    This file is part of the SOD package.
+#
+#    SOD is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#******************************************************************************
+
+# Orchestrates the end-to-end pipeline that converts *.vasp files to GULP inputs
+# and executes the calculations while respecting per-core and global limits.
 set -euo pipefail
 
+# Returns the number of GULP processes currently running on the machine.
 active_gulp_count() {
 	if command -v pgrep >/dev/null 2>&1; then
 		pgrep -x gulp 2>/dev/null | wc -l
@@ -10,6 +24,7 @@ active_gulp_count() {
 	fi
 }
 
+# Waits until the global concurrency limit leaves room for one more job.
 wait_for_global_capacity() {
 	if [ "$GLOBAL_GULP_LIMIT" -le 0 ]; then
 		return
@@ -20,6 +35,7 @@ wait_for_global_capacity() {
 	done
 }
 
+# Selects the next available per-core slot, cleaning up finished jobs on the way.
 wait_for_slot() {
 	while true; do
 		for slot in "${!CPU_ARRAY[@]}"; do
@@ -58,6 +74,7 @@ if [ "$cpu_count" -eq 0 ]; then
 	exit 1
 fi
 
+# Determine the global cap for concurrent GULP runs (defaults to local slots).
 if [ -n "${SOD_GULP_GLOBAL_LIMIT:-}" ]; then
 	GLOBAL_GULP_LIMIT=$SOD_GULP_GLOBAL_LIMIT
 else

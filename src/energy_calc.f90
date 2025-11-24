@@ -10,6 +10,8 @@
 !
 !******************************************************************************
 
+! Module with the cluster-expansion based energy calculator used by SOD to
+! evaluate relaxed structures, including symmetry mappings and GULP I/O.
 MODULE energy_calc
     USE omp_lib, ONLY: omp_in_parallel
     USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit

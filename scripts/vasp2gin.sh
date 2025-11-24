@@ -134,6 +134,7 @@ run_raspa_convert() {
 workspace=""
 file_dir=$(dirname "$file")
 workspace=$(mktemp -d "${file_dir}/vasp2gin_tmp.XXXXXX")
+# Ensures the temporary workspace is removed on success and preserved on failure for debugging.
 cleanup_workspace() {
 	local status="$1"
 	if [ -n "$workspace" ] && [ -d "$workspace" ]; then
