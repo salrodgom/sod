@@ -1,6 +1,17 @@
 #!/bin/bash
-# Converts a POSCAR-like VASP file into the GULP input bundle required by SOD/GULP calibrations.
+#*******************************************************************************
+#    Copyright (c) 2025, Salvador R.G. Balestra
+#
+#    This file is part of the SOD package.
+#
+#    SOD is free software: you can redistribute it and/or modify
+#    it under the terms of the GNU General Public License as published by
+#    the Free Software Foundation, either version 3 of the License, or
+#    (at your option) any later version.
+#
+#******************************************************************************
 
+# Converts a POSCAR-like VASP file into the GULP input bundle required by SOD/GULP calibrations.
 set -euo pipefail
 
 # Validate inputs and capture the path to the structure that must be converted.
@@ -23,7 +34,6 @@ ase_candidates=(
 # Write the minimal RASPA input files used to translate the CIF back into a relaxed structure.
 raspa_input_file() {
 	local target_dir="$1"
-
 	cat >"${target_dir}/pseudo_atoms.def" <<'EOF'
 #number of pseudo atoms
 5
