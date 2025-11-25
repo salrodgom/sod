@@ -1458,6 +1458,7 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
     LOGICAL :: can_use_high
     LOGICAL :: ge_map_alloc, si_map_alloc
     LOGICAL :: allow_parallel
+    LOGICAL :: needs_serial_lock
     REAL(dp) :: x_ge, w_low, w_high, mix_beta
     REAL(dp) :: best_low_contrib(4), best_high_contrib(4)
     REAL(dp) :: low_contrib_local(4), high_contrib_local(4)
@@ -1506,6 +1507,10 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
     IF (nsi > 0 .AND. .NOT. ALLOCATED(hE1)) can_use_high = .FALSE.
     
     allow_parallel = .NOT. omp_in_parallel()
+    needs_serial_lock = .FALSE.
+    IF (.NOT. allow_parallel) THEN
+        needs_serial_lock = omp_in_parallel()
+    END IF
 
     bounds_error = .FALSE.
     bounds_error_code = 0
@@ -1573,47 +1578,13 @@ SUBROUTINE calculate_structure_energy(config, n_sites, energy, energy_low_side, 
             !$omp end critical
         !$omp end parallel
     ELSE
-        min_energy_low_thread = huge_val
-        min_energy_high_thread = huge_val
-        best_low_contrib_thread = 0.0_dp
-        best_high_contrib_thread = 0.0_dp
-
-        ge_map_alloc = .true.
-        si_map_alloc = .true.
-
-        ALLOCATE(ge_map_buf_local(MAX(1, nge)))
-        ALLOCATE(si_map_buf_local(MAX(1, nsi)))
-
-        DO op = 1, nop
-            IF (bounds_error) EXIT
-            CALL evaluate_symmetry_op(op, ge_map_buf_local, si_map_buf_local, energy_tmp, low_contrib_local, &
-                energy_high_tmp, high_contrib_local)
-
-            IF (bounds_error) EXIT
-
-            IF (energy_tmp < min_energy_low_thread) THEN
-                min_energy_low_thread = energy_tmp
-                best_low_contrib_thread = low_contrib_local
-            END IF
-
-            IF (can_use_high) THEN
-                IF (energy_high_tmp < min_energy_high_thread) THEN
-                    min_energy_high_thread = energy_high_tmp
-                    best_high_contrib_thread = high_contrib_local
-                END IF
-            END IF
-        END DO
-
-        IF (ge_map_alloc) DEALLOCATE(ge_map_buf_local)
-        IF (si_map_alloc) DEALLOCATE(si_map_buf_local)
-
-        IF (min_energy_low_thread < min_energy_low) THEN
-            min_energy_low = min_energy_low_thread
-            best_low_contrib = best_low_contrib_thread
-        END IF
-        IF (can_use_high .AND. min_energy_high_thread < min_energy_high) THEN
-            min_energy_high = min_energy_high_thread
-            best_high_contrib = best_high_contrib_thread
+        IF (needs_serial_lock) THEN
+            ! Serial path hit inside an outer OpenMP region; protect heap ops.
+            !$omp critical(energy_calc_serial)
+            CALL serial_symmetry_scan()
+            !$omp end critical(energy_calc_serial)
+        ELSE
+            CALL serial_symmetry_scan()
         END IF
     END IF
 
@@ -1662,6 +1633,53 @@ IF (PRESENT(high_contrib)) THEN
 END IF
 
 CONTAINS
+
+    SUBROUTINE serial_symmetry_scan()
+        IMPLICIT NONE
+
+        min_energy_low_thread = huge_val
+        min_energy_high_thread = huge_val
+        best_low_contrib_thread = 0.0_dp
+        best_high_contrib_thread = 0.0_dp
+
+        ge_map_alloc = .true.
+        si_map_alloc = .true.
+
+        ALLOCATE(ge_map_buf_local(MAX(1, nge)))
+        ALLOCATE(si_map_buf_local(MAX(1, nsi)))
+
+        DO op = 1, nop
+            IF (bounds_error) EXIT
+            CALL evaluate_symmetry_op(op, ge_map_buf_local, si_map_buf_local, energy_tmp, low_contrib_local, &
+                energy_high_tmp, high_contrib_local)
+
+            IF (bounds_error) EXIT
+
+            IF (energy_tmp < min_energy_low_thread) THEN
+                min_energy_low_thread = energy_tmp
+                best_low_contrib_thread = low_contrib_local
+            END IF
+
+            IF (can_use_high) THEN
+                IF (energy_high_tmp < min_energy_high_thread) THEN
+                    min_energy_high_thread = energy_high_tmp
+                    best_high_contrib_thread = high_contrib_local
+                END IF
+            END IF
+        END DO
+
+        IF (ge_map_alloc) DEALLOCATE(ge_map_buf_local)
+        IF (si_map_alloc) DEALLOCATE(si_map_buf_local)
+
+        IF (min_energy_low_thread < min_energy_low) THEN
+            min_energy_low = min_energy_low_thread
+            best_low_contrib = best_low_contrib_thread
+        END IF
+        IF (can_use_high .AND. min_energy_high_thread < min_energy_high) THEN
+            min_energy_high = min_energy_high_thread
+            best_high_contrib = best_high_contrib_thread
+        END IF
+    END SUBROUTINE serial_symmetry_scan
 
     SUBROUTINE evaluate_symmetry_op(op_idx, ge_map_buf_local, si_map_buf_local, energy_tmp, low_contrib_local, &
             energy_high_tmp, high_contrib_local)
