@@ -470,8 +470,7 @@ end subroutine parse_omp_flag
         end do
         if (valid_count > 0) then
             allocate(targets(valid_count))
-            targets = temp(1:valid_count)
-            call sort_int_ascending(targets, valid_count)
+            targets(1:valid_count) = temp(1:valid_count)
         end if
         deallocate(temp)
         deallocate(raw_levels)
