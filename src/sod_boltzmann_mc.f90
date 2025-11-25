@@ -121,22 +121,24 @@ program sod_boltzmann_mc
     write(*,*)
     
     if (use_parallel) then
-        !$omp parallel default(shared) private(local_config)
+        !$omp parallel default(shared) private(local_config, level, level_idx)
         allocate(local_config(total_sites))
-        !$omp do schedule(dynamic)
         if (has_level_overrides) then
+            !$omp do schedule(dynamic)
             do level_idx = 1, size(level_targets)
                 level = level_targets(level_idx)
                 call process_level(level, total_sites, local_config, temperature, samples_per_level, &
                 max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
             end do
+            !$omp end do
         else
+            !$omp do schedule(dynamic)
             do level = level_start, level_end
                 call process_level(level, total_sites, local_config, temperature, samples_per_level, &
                 max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
             end do
+            !$omp end do
         end if
-        !$omp end do
         deallocate(local_config)
         !$omp end parallel
     else
@@ -357,55 +359,57 @@ contains
         if (allocated(args)) deallocate(args)
         if (allocated(skip)) deallocate(skip)
         return
-        
-    contains
-        subroutine parse_level_list(spec_in, out_levels, status)
-            character(len=*), intent(in) :: spec_in
-            integer, allocatable, intent(out) :: out_levels(:)
-            integer, intent(out) :: status
-            character(len=512) :: buffer
-            character(len=256) :: token
-            integer :: length, count, pos, start_idx, idx, val
-            status = 0
-            buffer = trim(spec_in)
-            length = len_trim(buffer)
-            if (length <= 0) then
-                status = 1
-                return
-            end if
-            if (buffer(1:1) == ',' .or. buffer(length:length) == ',') then
-                status = 1
-                return
-            end if
-            count = 1
-            do pos = 1, length
-                if (buffer(pos:pos) == ',') then
-                    if (pos < length .and. buffer(pos+1:pos+1) == ',') then
-                        status = 1
-                        return
-                    end if
-                    count = count + 1
-                end if
-            end do
-            allocate(out_levels(count))
-            idx = 0
-            start_idx = 1
-            do pos = 1, length+1
-                if (pos > length .or. buffer(pos:pos) == ',') then
-                    idx = idx + 1
-                    token = buffer(start_idx:pos-1)
-                    token = adjustl(token)
-                    read(token,*,iostat=status) val
-                    if (status /= 0) then
-                        deallocate(out_levels)
-                        return
-                    end if
-                    out_levels(idx) = val
-                    start_idx = pos + 1
-                end if
-            end do
-        end subroutine parse_level_list
     end subroutine parse_arguments
+
+    subroutine parse_level_list(spec_in, out_levels, status)
+        character(len=*), intent(in) :: spec_in
+        integer, allocatable, intent(out) :: out_levels(:)
+        integer, intent(out) :: status
+        character(len=512) :: buffer
+        character(len=256) :: token
+        integer :: length, count, pos, start_idx, idx, val
+
+        status = 0
+        buffer = trim(spec_in)
+        length = len_trim(buffer)
+        if (length <= 0) then
+            status = 1
+            return
+        end if
+        if (buffer(1:1) == ',' .or. buffer(length:length) == ',') then
+            status = 1
+            return
+        end if
+
+        count = 1
+        do pos = 1, length
+            if (buffer(pos:pos) == ',') then
+                if (pos < length .and. buffer(pos+1:pos+1) == ',') then
+                    status = 1
+                    return
+                end if
+                count = count + 1
+            end if
+        end do
+
+        allocate(out_levels(count))
+        idx = 0
+        start_idx = 1
+        do pos = 1, length + 1
+            if (pos > length .or. buffer(pos:pos) == ',') then
+                idx = idx + 1
+                token = buffer(start_idx:pos-1)
+                token = adjustl(token)
+                read(token,*,iostat=status) val
+                if (status /= 0) then
+                    if (allocated(out_levels)) deallocate(out_levels)
+                    return
+                end if
+                out_levels(idx) = val
+                start_idx = pos + 1
+            end if
+        end do
+    end subroutine parse_level_list
 
 ! Interprets an OpenMP flag token and updates the parallel execution mode.
 subroutine parse_omp_flag(raw, use_parallel, omp_available)
