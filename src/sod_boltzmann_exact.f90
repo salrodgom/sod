@@ -12,6 +12,7 @@ program sod_boltzmann_exact
 
     integer :: level_min, level_max
     real(dp) :: energy_tolerance
+    logical :: just_outsod
     integer :: nop, total_sites
     integer, allocatable :: eqmatrix(:,:)
     integer, allocatable :: scratch_config(:)
@@ -24,7 +25,7 @@ program sod_boltzmann_exact
     real(dp), parameter :: mix_x0 = 0.5_dp
     real(dp), parameter :: mix_d0 = 0.01_dp
 
-    call parse_arguments_exact(level_min, level_max, energy_tolerance)
+    call parse_arguments_exact(level_min, level_max, energy_tolerance, just_outsod)
 
     call init_energy_calc()
     call get_eqmatrix(eqmatrix, nop, total_sites)
@@ -49,116 +50,119 @@ program sod_boltzmann_exact
     write(*,'(A,I0)') 'Sitios sustituibles (npos): ', total_sites
     write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_min, ' .. ', level_max
     write(*,'(A,ES12.5)') 'Tolerancia para agrupar mínimos (eV): ', energy_tolerance
+    if (just_outsod) then
+        write(*,'(A)') 'Modo --just-outsod activo: solo se generarán archivos OUTSOD_Nxxxx.'
+        write(*,'(A)') 'Se omiten ENERGIES_Nxxxx, POSCAR_* y resúmenes energéticos.'
+    end if
     write(*,*)
     call flush(output_unit)
 
     do level = level_min, level_max
-        call process_level_exact(level, total_sites, scratch_config, energy_tolerance)
+        call process_level_exact(level, total_sites, scratch_config, energy_tolerance, just_outsod)
     end do
     deallocate(scratch_config)
     call cleanup_energy_calc()
 contains
 
-    subroutine parse_arguments_exact(level_min, level_max, tol)
+    subroutine parse_arguments_exact(level_min, level_max, tol, just_outsod)
         implicit none
         integer, intent(out) :: level_min, level_max
         real(dp), intent(out) :: tol
-        integer :: argc, ios, colon_pos, iarg
-        character(len=256) :: carg, range_spec, tol_arg
-        logical :: found_n_flag
+        logical, intent(out) :: just_outsod
+        integer :: argc, iarg, colon_pos, ios
+        character(len=256) :: arg, spec
+        integer :: level_candidate, lower, upper
+        real(dp) :: tol_candidate
+        logical :: level_specified
 
         level_min = 0
         level_max = -1
         tol = 1.0e-6_dp
-        found_n_flag = .false.
+        just_outsod = .false.
+        level_specified = .false.
 
         argc = command_argument_count()
-
-        if (argc >= 1) then
-            call get_command_argument(1, carg)
-            if (is_help_token(carg)) then
+        iarg = 1
+        do while (iarg <= argc)
+            call get_command_argument(iarg, arg)
+            if (is_help_token(arg)) then
                 call print_usage_exact()
                 stop 0
             end if
-        end if
 
-        do iarg = 1, argc
-            call get_command_argument(iarg, carg)
-            if (trim(carg) == '-N' .or. trim(carg) == '-n') then
+            select case (trim(arg))
+            case ('-N','-n')
                 if (iarg + 1 > argc) then
                     write(*,'(A)') 'Error: falta especificación después de -N.'
                     call print_usage_exact()
                     stop 1
                 end if
-                call get_command_argument(iarg + 1, range_spec)
-                found_n_flag = .true.
-
-                colon_pos = index(range_spec, ':')
+                call get_command_argument(iarg + 1, spec)
+                colon_pos = index(spec, ':')
                 if (colon_pos > 0) then
-                    read(range_spec(1:colon_pos-1), *, iostat=ios) level_min
-                    read(range_spec(colon_pos+1:), *, iostat=ios) level_max
+                    read(spec(1:colon_pos-1), *, iostat=ios) lower
                     if (ios /= 0) then
-                        write(*,'(A)') 'Error: formato de rango inválido. Use N:M (ej: 1:12).'
+                        write(*,'(A)') 'Error: límite inferior inválido en -N.'
                         call print_usage_exact()
                         stop 1
                     end if
+                    read(spec(colon_pos+1:), *, iostat=ios) upper
+                    if (ios /= 0) then
+                        write(*,'(A)') 'Error: límite superior inválido en -N.'
+                        call print_usage_exact()
+                        stop 1
+                    end if
+                    level_min = lower
+                    level_max = upper
                 else
-                    read(range_spec, *, iostat=ios) level_min
+                    read(spec, *, iostat=ios) level_candidate
                     if (ios /= 0) then
                         write(*,'(A)') 'Error: especificación de nivel inválida.'
                         call print_usage_exact()
                         stop 1
                     end if
-                    if (level_min < 0) then
+                    if (level_candidate < 0) then
                         level_min = 0
                         level_max = -1
                     else
-                        level_max = level_min
+                        level_min = level_candidate
+                        level_max = level_candidate
                     end if
                 end if
-                exit
-            end if
+                level_specified = .true.
+                iarg = iarg + 2
+            case ('--just-outsod','--solo-outsod','--only-outsod')
+                just_outsod = .true.
+                iarg = iarg + 1
+            case default
+                read(arg, *, iostat=ios) level_candidate
+                if (ios == 0 .and. .not. level_specified) then
+                    if (level_candidate < 0) then
+                        level_min = 0
+                        level_max = -1
+                    else
+                        level_min = 0
+                        level_max = level_candidate
+                    end if
+                    level_specified = .true.
+                    iarg = iarg + 1
+                else
+                    read(arg, *, iostat=ios) tol_candidate
+                    if (ios /= 0) then
+                        write(*,'(A)') 'Error: argumento no reconocido.'
+                        call print_usage_exact()
+                        stop 1
+                    end if
+                    if (tol_candidate <= 0.0_dp) then
+                        write(*,'(A)') 'Aviso: tolerancia inválida, se usa 1e-6.'
+                        tol = 1.0e-6_dp
+                    else
+                        tol = tol_candidate
+                    end if
+                    iarg = iarg + 1
+                end if
+            end select
         end do
-
-        if (argc >= 1) then
-            if (found_n_flag) then
-                if (argc >= 3) then
-                    call get_command_argument(3, tol_arg)
-                    if (trim(tol_arg) /= '-N' .and. trim(tol_arg) /= '-n') then
-                        read(tol_arg, *, iostat=ios) tol
-                        if (ios /= 0 .or. tol <= 0.0_dp) then
-                            write(*,'(A)') 'Aviso: tolerancia inválida, se usa 1e-6.'
-                            tol = 1.0e-6_dp
-                        end if
-                    end if
-                end if
-            else
-                if (argc >= 1) then
-                    call get_command_argument(1, carg)
-                    read(carg, *, iostat=ios) level_max
-                    if (ios == 0) then
-                        if (level_max < 0) then
-                            level_min = 0
-                            level_max = -1
-                        else
-                            level_min = 0
-                        end if
-                    else
-                        level_min = 0
-                        level_max = -1
-                    end if
-
-                    if (argc >= 2) then
-                        call get_command_argument(2, carg)
-                        read(carg, *, iostat=ios) tol
-                        if (ios /= 0 .or. tol <= 0.0_dp) then
-                            write(*,'(A)') 'Aviso: tolerancia inválida, se usa 1e-6.'
-                            tol = 1.0e-6_dp
-                        end if
-                    end if
-                end if
-            end if
-        end if
     end subroutine parse_arguments_exact
 
     subroutine print_usage_exact()
@@ -171,6 +175,7 @@ contains
         write(*,'(A)') '             -N -1      : Todos los niveles (0..npos)'
         write(*,'(A)') '             -N 12      : Sólo el nivel 12'
         write(*,'(A)') '             -N 1:12    : Rango del nivel 1 al 12 (inclusive)'
+        write(*,'(A)') '  --just-outsod  Genera solo OUTSOD_Nxxxx (sin ENERGIES ni POSCAR).'
         write(*,'(A)') ''
         write(*,'(A)') '  tol_eV     Tolerancia en energía (eV) para considerar configuraciones'
         write(*,'(A)') '             equivalentes [por defecto: 1e-6].'
@@ -212,11 +217,12 @@ contains
         end select
     end function is_help_token
 
-    subroutine process_level_exact(level, total_sites, config, tol)
+    subroutine process_level_exact(level, total_sites, config, tol, just_outsod)
         implicit none
         integer, intent(in) :: level, total_sites
         integer, intent(inout) :: config(:)
         real(dp), intent(in) :: tol
+        logical, intent(in) :: just_outsod
 
         integer(ip) :: total_comb
         real(dp) :: energy, low_estimate, high_estimate
@@ -437,11 +443,16 @@ contains
             else
                 tmp_high(1) = sentinel_energy
             end if
-            call write_level_outputs(level, total_sites, 1, tmp_subsets, tmp_deg, tmp_low, tmp_high)
+            call write_level_outputs(level, total_sites, 1, tmp_subsets, tmp_deg, tmp_low, tmp_high, .not. just_outsod)
             deallocate(tmp_subsets)
             deallocate(tmp_deg)
             deallocate(tmp_low)
             deallocate(tmp_high)
+
+            if (just_outsod) then
+                if (allocated(eqmatrix_local)) deallocate(eqmatrix_local)
+                return
+            end if
 
             allocate(best_subsets_si(0,1))
             allocate(best_subsets_ge(0,1))
@@ -488,6 +499,7 @@ contains
             deallocate(best_values_ge)
             deallocate(best_deg_si)
             deallocate(best_deg_ge)
+            if (allocated(eqmatrix_local)) deallocate(eqmatrix_local)
             return
         end if
 
@@ -497,22 +509,24 @@ contains
             subset(i) = i
         end do
 
-        capacity_si = max(8, level)
-        capacity_ge = max(8, level)
-        allocate(best_subsets_si(level, capacity_si))
-        allocate(best_subsets_ge(level, capacity_ge))
-        allocate(best_values_si(capacity_si))
-        allocate(best_values_ge(capacity_ge))
-        allocate(best_deg_si(capacity_si))
-        allocate(best_deg_ge(capacity_ge))
-        best_values_si = 0.0_dp
-        best_values_ge = 0.0_dp
-        best_deg_si = 0
-        best_deg_ge = 0
-        best_count_si = 0
-        best_count_ge = 0
-        best_energy_si = huge(1.0_dp)
-        best_energy_ge = huge(1.0_dp)
+        if (.not. just_outsod) then
+            capacity_si = max(8, level)
+            capacity_ge = max(8, level)
+            allocate(best_subsets_si(level, capacity_si))
+            allocate(best_subsets_ge(level, capacity_ge))
+            allocate(best_values_si(capacity_si))
+            allocate(best_values_ge(capacity_ge))
+            allocate(best_deg_si(capacity_si))
+            allocate(best_deg_ge(capacity_ge))
+            best_values_si = 0.0_dp
+            best_values_ge = 0.0_dp
+            best_deg_si = 0
+            best_deg_ge = 0
+            best_count_si = 0
+            best_count_ge = 0
+            best_energy_si = huge(1.0_dp)
+            best_energy_ge = huge(1.0_dp)
+        end if
 
         unique_capacity = max(8, level)
         allocate(unique_subsets(level, unique_capacity))
@@ -551,280 +565,284 @@ contains
         write(*,'(A,I0)') 'Configuraciones unicas evaluadas: ', unique_count
         call flush(output_unit)
 
-        do idx = 1, unique_count
-            if (unique_low(idx) == sentinel_energy) then
-                config = 1
-                config(unique_subsets(1:level, idx)) = 2
-                call calculate_structure_energy(config, total_sites, energy, energy_low_side=low_estimate, &
-                 energy_high_side=high_estimate, low_contrib=unique_low_contrib(:, idx), &
-                 high_contrib=unique_high_contrib(:, idx))
-                if (.not. allow_low_estimate) then
-                    low_estimate = sentinel_energy
-                    unique_low_contrib(:, idx) = 0.0_dp
+        if (just_outsod) then
+            call write_level_outputs(level, total_sites, unique_count, unique_subsets, unique_deg, unique_low, unique_high, .false.)
+        else
+            do idx = 1, unique_count
+                if (unique_low(idx) == sentinel_energy) then
+                    config = 1
+                    config(unique_subsets(1:level, idx)) = 2
+                    call calculate_structure_energy(config, total_sites, energy, energy_low_side=low_estimate, &
+                         energy_high_side=high_estimate, low_contrib=unique_low_contrib(:, idx), &
+                         high_contrib=unique_high_contrib(:, idx))
+                    if (.not. allow_low_estimate) then
+                        low_estimate = sentinel_energy
+                        unique_low_contrib(:, idx) = 0.0_dp
+                    end if
+                    if (.not. allow_high_estimate) then
+                        high_estimate = sentinel_energy
+                        unique_high_contrib(:, idx) = 0.0_dp
+                    end if
+                    unique_low(idx) = low_estimate
+                    unique_high(idx) = high_estimate
                 end if
-                if (.not. allow_high_estimate) then
-                    high_estimate = sentinel_energy
-                    unique_high_contrib(:, idx) = 0.0_dp
-                end if
-                unique_low(idx) = low_estimate
-                unique_high(idx) = high_estimate
-            end if
-        end do
+            end do
 
-        hole_count = total_sites - level
-        need_low_calibration = allow_low_estimate .and. (level > get_max_low_order())
-        need_high_calibration = allow_high_estimate .and. (hole_count > get_max_high_order())
+            hole_count = total_sites - level
+            need_low_calibration = allow_low_estimate .and. (level > get_max_low_order())
+            need_high_calibration = allow_high_estimate .and. (hole_count > get_max_high_order())
 
-        if (need_low_calibration .and. need_high_calibration) then
-            call calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_low_contrib, unique_high_contrib, unique_deg, unique_low, unique_high, config, need_low_calibration, need_high_calibration)
-        end if
-
-        ge_fraction = 0.0_dp
-        if (total_sites > 0) ge_fraction = real(level, dp) / real(total_sites, dp)
-        weight_low = mixing_weight(ge_fraction)
-        weight_low = max(0.0_dp, min(1.0_dp, weight_low))
-        weight_high = 1.0_dp - weight_low
-
-        weighted_low_sum = 0.0_dp
-        weighted_high_sum = 0.0_dp
-        weighted_low_sq_sum = 0.0_dp
-        weighted_high_sq_sum = 0.0_dp
-        weighted_total_sum = 0.0_dp
-        weighted_total_sq_sum = 0.0_dp
-        boltzmann_low_weight_sum = 0.0_dp
-        boltzmann_high_weight_sum = 0.0_dp
-        boltzmann_total_weight_sum = 0.0_dp
-        boltzmann_low_energy_sum = 0.0_dp
-        boltzmann_high_energy_sum = 0.0_dp
-        boltzmann_total_energy_sum = 0.0_dp
-        boltzmann_low_energy_sq_sum = 0.0_dp
-        boltzmann_high_energy_sq_sum = 0.0_dp
-        boltzmann_total_energy_sq_sum = 0.0_dp
-        total_degeneracy_weight = 0
-        total_low_weight = 0
-        total_high_weight = 0
-        total_total_weight = 0
-        min_low_energy = huge_marker
-        min_high_energy = huge_marker
-        min_total_energy = huge_marker
-
-        do idx = 1, unique_count
-            degeneracy_weight = real(unique_deg(idx), dp)
-            total_degeneracy_weight = total_degeneracy_weight + unique_deg(idx)
-
-            if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
-                total_low_weight = total_low_weight + unique_deg(idx)
-                weighted_low_sum = weighted_low_sum + degeneracy_weight * unique_low(idx)
-                weighted_low_sq_sum = weighted_low_sq_sum + degeneracy_weight * unique_low(idx) * unique_low(idx)
-                if (unique_low(idx) < min_low_energy) min_low_energy = unique_low(idx)
+            if (need_low_calibration .and. need_high_calibration) then
+                call calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_low_contrib, unique_high_contrib, unique_deg, unique_low, unique_high, config, need_low_calibration, need_high_calibration)
             end if
 
-            if (unique_high(idx) /= sentinel_energy .and. abs(unique_high(idx)) < huge_marker) then
-                total_high_weight = total_high_weight + unique_deg(idx)
-                weighted_high_sum = weighted_high_sum + degeneracy_weight * unique_high(idx)
-                weighted_high_sq_sum = weighted_high_sq_sum + degeneracy_weight * unique_high(idx) * unique_high(idx)
-                if (unique_high(idx) < min_high_energy) min_high_energy = unique_high(idx)
-            end if
+            ge_fraction = 0.0_dp
+            if (total_sites > 0) ge_fraction = real(level, dp) / real(total_sites, dp)
+            weight_low = mixing_weight(ge_fraction)
+            weight_low = max(0.0_dp, min(1.0_dp, weight_low))
+            weight_high = 1.0_dp - weight_low
 
-            combined_energy = combined_energy_value(unique_low(idx), unique_high(idx), weight_low, weight_high)
-            if (combined_energy < huge_marker) then
-                total_total_weight = total_total_weight + unique_deg(idx)
-                weighted_total_sum = weighted_total_sum + degeneracy_weight * combined_energy
-                weighted_total_sq_sum = weighted_total_sq_sum + degeneracy_weight * combined_energy * combined_energy
-                if (combined_energy < min_total_energy) min_total_energy = combined_energy
-            end if
-        end do
-
-        if (total_low_weight > 0) then
-            mean_low_all = weighted_low_sum / real(total_low_weight, dp)
-            variance_low_all = max(0.0_dp, weighted_low_sq_sum / real(total_low_weight, dp) - mean_low_all * mean_low_all)
-        else
-            mean_low_all = 0.0_dp
-            variance_low_all = 0.0_dp
-            min_low_energy = huge_marker
-        end if
-
-        if (total_high_weight > 0) then
-            mean_high_all = weighted_high_sum / real(total_high_weight, dp)
-            variance_high_all = max(0.0_dp, weighted_high_sq_sum / real(total_high_weight, dp) - mean_high_all * mean_high_all)
-        else
-            mean_high_all = 0.0_dp
-            variance_high_all = 0.0_dp
-            min_high_energy = huge_marker
-        end if
-
-        if (total_total_weight > 0) then
-            mean_total_all = weighted_total_sum / real(total_total_weight, dp)
-            variance_total_all = max(0.0_dp, weighted_total_sq_sum / real(total_total_weight, dp) - mean_total_all * mean_total_all)
-        else
-            mean_total_all = 0.0_dp
-            variance_total_all = 0.0_dp
-            min_total_energy = huge_marker
-        end if
-
-        call write_level_outputs(level, total_sites, unique_count, unique_subsets, unique_deg, unique_low, unique_high)
-
-        boltzmann_mean_low = mean_low_all
-        boltzmann_variance_low = variance_low_all
-        boltzmann_mean_high = mean_high_all
-        boltzmann_variance_high = variance_high_all
-        boltzmann_mean_total = mean_total_all
-        boltzmann_variance_total = variance_total_all
-
-        if (total_low_weight > 0) then
-            boltzmann_reference_low = min_low_energy
-            if (boltzmann_reference_low >= huge_marker) boltzmann_reference_low = mean_low_all
+            weighted_low_sum = 0.0_dp
+            weighted_high_sum = 0.0_dp
+            weighted_low_sq_sum = 0.0_dp
+            weighted_high_sq_sum = 0.0_dp
+            weighted_total_sum = 0.0_dp
+            weighted_total_sq_sum = 0.0_dp
             boltzmann_low_weight_sum = 0.0_dp
-            boltzmann_low_energy_sum = 0.0_dp
-            boltzmann_low_energy_sq_sum = 0.0_dp
-            do idx = 1, unique_count
-                if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
-                    degeneracy_weight = real(unique_deg(idx), dp)
-                    boltzmann_factor = exp(-(unique_low(idx) - boltzmann_reference_low) / (kB_eVk * boltzmann_temperature))
-                    boltzmann_low_weight_sum = boltzmann_low_weight_sum + degeneracy_weight * boltzmann_factor
-                    boltzmann_low_energy_sum = boltzmann_low_energy_sum + degeneracy_weight * boltzmann_factor * unique_low(idx)
-                    boltzmann_low_energy_sq_sum = boltzmann_low_energy_sq_sum + degeneracy_weight * boltzmann_factor * unique_low(idx) * unique_low(idx)
-                end if
-            end do
-            if (boltzmann_low_weight_sum > 0.0_dp) then
-                boltzmann_mean_low = boltzmann_low_energy_sum / boltzmann_low_weight_sum
-                boltzmann_variance_low = max(0.0_dp, boltzmann_low_energy_sq_sum / boltzmann_low_weight_sum - boltzmann_mean_low * boltzmann_mean_low)
-            end if
-        end if
-
-        if (total_high_weight > 0) then
-            boltzmann_reference_high = min_high_energy
-            if (boltzmann_reference_high >= huge_marker) boltzmann_reference_high = mean_high_all
             boltzmann_high_weight_sum = 0.0_dp
-            boltzmann_high_energy_sum = 0.0_dp
-            boltzmann_high_energy_sq_sum = 0.0_dp
-            do idx = 1, unique_count
-                if (unique_high(idx) /= sentinel_energy .and. abs(unique_high(idx)) < huge_marker) then
-                    degeneracy_weight = real(unique_deg(idx), dp)
-                    boltzmann_factor = exp(-(unique_high(idx) - boltzmann_reference_high) / (kB_eVk * boltzmann_temperature))
-                    boltzmann_high_weight_sum = boltzmann_high_weight_sum + degeneracy_weight * boltzmann_factor
-                    boltzmann_high_energy_sum = boltzmann_high_energy_sum + degeneracy_weight * boltzmann_factor * unique_high(idx)
-                    boltzmann_high_energy_sq_sum = boltzmann_high_energy_sq_sum + degeneracy_weight * boltzmann_factor * unique_high(idx) * unique_high(idx)
-                end if
-            end do
-            if (boltzmann_high_weight_sum > 0.0_dp) then
-                boltzmann_mean_high = boltzmann_high_energy_sum / boltzmann_high_weight_sum
-                boltzmann_variance_high = max(0.0_dp, boltzmann_high_energy_sq_sum / boltzmann_high_weight_sum - boltzmann_mean_high * boltzmann_mean_high)
-            end if
-        end if
-
-        if (total_total_weight > 0) then
-            boltzmann_reference_total = min_total_energy
-            if (boltzmann_reference_total >= huge_marker) boltzmann_reference_total = mean_total_all
             boltzmann_total_weight_sum = 0.0_dp
+            boltzmann_low_energy_sum = 0.0_dp
+            boltzmann_high_energy_sum = 0.0_dp
             boltzmann_total_energy_sum = 0.0_dp
+            boltzmann_low_energy_sq_sum = 0.0_dp
+            boltzmann_high_energy_sq_sum = 0.0_dp
             boltzmann_total_energy_sq_sum = 0.0_dp
+            total_degeneracy_weight = 0
+            total_low_weight = 0
+            total_high_weight = 0
+            total_total_weight = 0
+            min_low_energy = huge_marker
+            min_high_energy = huge_marker
+            min_total_energy = huge_marker
+
             do idx = 1, unique_count
                 degeneracy_weight = real(unique_deg(idx), dp)
+                total_degeneracy_weight = total_degeneracy_weight + unique_deg(idx)
+
+                if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
+                    total_low_weight = total_low_weight + unique_deg(idx)
+                    weighted_low_sum = weighted_low_sum + degeneracy_weight * unique_low(idx)
+                    weighted_low_sq_sum = weighted_low_sq_sum + degeneracy_weight * unique_low(idx) * unique_low(idx)
+                    if (unique_low(idx) < min_low_energy) min_low_energy = unique_low(idx)
+                end if
+
+                if (unique_high(idx) /= sentinel_energy .and. abs(unique_high(idx)) < huge_marker) then
+                    total_high_weight = total_high_weight + unique_deg(idx)
+                    weighted_high_sum = weighted_high_sum + degeneracy_weight * unique_high(idx)
+                    weighted_high_sq_sum = weighted_high_sq_sum + degeneracy_weight * unique_high(idx) * unique_high(idx)
+                    if (unique_high(idx) < min_high_energy) min_high_energy = unique_high(idx)
+                end if
+
                 combined_energy = combined_energy_value(unique_low(idx), unique_high(idx), weight_low, weight_high)
                 if (combined_energy < huge_marker) then
-                    boltzmann_factor = exp(-(combined_energy - boltzmann_reference_total) / (kB_eVk * boltzmann_temperature))
-                    boltzmann_total_weight_sum = boltzmann_total_weight_sum + degeneracy_weight * boltzmann_factor
-                    boltzmann_total_energy_sum = boltzmann_total_energy_sum + degeneracy_weight * boltzmann_factor * combined_energy
-                    boltzmann_total_energy_sq_sum = boltzmann_total_energy_sq_sum + degeneracy_weight * boltzmann_factor * combined_energy * combined_energy
+                    total_total_weight = total_total_weight + unique_deg(idx)
+                    weighted_total_sum = weighted_total_sum + degeneracy_weight * combined_energy
+                    weighted_total_sq_sum = weighted_total_sq_sum + degeneracy_weight * combined_energy * combined_energy
+                    if (combined_energy < min_total_energy) min_total_energy = combined_energy
                 end if
             end do
-            if (boltzmann_total_weight_sum > 0.0_dp) then
-                boltzmann_mean_total = boltzmann_total_energy_sum / boltzmann_total_weight_sum
-                boltzmann_variance_total = max(0.0_dp, boltzmann_total_energy_sq_sum / boltzmann_total_weight_sum - boltzmann_mean_total * boltzmann_mean_total)
+
+            if (total_low_weight > 0) then
+                mean_low_all = weighted_low_sum / real(total_low_weight, dp)
+                variance_low_all = max(0.0_dp, weighted_low_sq_sum / real(total_low_weight, dp) - mean_low_all * mean_low_all)
+            else
+                mean_low_all = 0.0_dp
+                variance_low_all = 0.0_dp
+                min_low_energy = huge_marker
             end if
-        end if
 
-        if (total_low_weight > 0) then
-            entropy_low = kB_eVk * log(real(total_low_weight, dp))
-            ts_low = entropy_low * temp_targets
-            free_energy_low = boltzmann_mean_low - ts_low
-            deltaF_quartz_si = quartz_relative(level, total_sites, free_energy_low(1))
-        else
-            entropy_low = 0.0_dp
-            ts_low = 0.0_dp
-            free_energy_low = 0.0_dp
-            deltaF_quartz_si = 0.0_dp
-        end if
-
-        if (total_high_weight > 0) then
-            entropy_high = kB_eVk * log(real(total_high_weight, dp))
-            ts_high = entropy_high * temp_targets
-            free_energy_high = boltzmann_mean_high - ts_high
-            deltaF_quartz_ge = quartz_relative(level, total_sites, free_energy_high(1))
-        else
-            entropy_high = 0.0_dp
-            ts_high = 0.0_dp
-            free_energy_high = 0.0_dp
-            deltaF_quartz_ge = 0.0_dp
-        end if
-
-        if (total_degeneracy_weight > 0) then
-            entropy_total = kB_eVk * log(real(total_degeneracy_weight, dp))
-        else
-            entropy_total = 0.0_dp
-        end if
-
-        if (min_low_energy >= huge_marker) min_low_energy = mean_low_all
-        if (min_high_energy >= huge_marker) min_high_energy = mean_high_all
-        if (min_total_energy >= huge_marker) min_total_energy = mean_total_all
-
-        if (total_low_weight > 0 .and. total_high_weight > 0) then
-            expected_mix = weight_low * boltzmann_mean_low + weight_high * boltzmann_mean_high
-        else if (total_low_weight > 0) then
-            expected_mix = boltzmann_mean_low
-        else if (total_high_weight > 0) then
-            expected_mix = boltzmann_mean_high
-        else
-            expected_mix = boltzmann_mean_total
-        end if
-
-        valid_low = (total_low_weight > 0)
-        valid_high = (total_high_weight > 0)
-        valid_total = (total_total_weight > 0)
-        delta_exp_total = merge(quartz_relative(level, total_sites, boltzmann_mean_total), 0.0_dp, valid_total)
-        delta_min_total = merge(quartz_relative(level, total_sites, min_total_energy), 0.0_dp, valid_total)
-        delta_exp_low = merge(quartz_relative(level, total_sites, boltzmann_mean_low), 0.0_dp, valid_low)
-        delta_min_low = merge(quartz_relative(level, total_sites, min_low_energy), 0.0_dp, valid_low)
-        delta_exp_high = merge(quartz_relative(level, total_sites, boltzmann_mean_high), 0.0_dp, valid_high)
-        delta_min_high = merge(quartz_relative(level, total_sites, min_high_energy), 0.0_dp, valid_high)
-        delta_exp_mix = quartz_relative(level, total_sites, expected_mix)
-        accept_ratio = 1.0_dp
-
-        do idx = 1, unique_count
-            if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
-                call update_best_structures_side(level, unique_subsets(1:level, idx), unique_low(idx), unique_deg(idx), tol, best_energy_si, best_subsets_si, best_values_si, best_deg_si, best_count_si, capacity_si, eqmatrix_local, nop_local)
+            if (total_high_weight > 0) then
+                mean_high_all = weighted_high_sum / real(total_high_weight, dp)
+                variance_high_all = max(0.0_dp, weighted_high_sq_sum / real(total_high_weight, dp) - mean_high_all * mean_high_all)
+            else
+                mean_high_all = 0.0_dp
+                variance_high_all = 0.0_dp
+                min_high_energy = huge_marker
             end if
-            if (unique_high(idx) /= sentinel_energy .and. abs(unique_high(idx)) < huge_marker) then
-                call update_best_structures_side(level, unique_subsets(1:level, idx), unique_high(idx), unique_deg(idx), tol, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, best_count_ge, capacity_ge, eqmatrix_local, nop_local)
+
+            if (total_total_weight > 0) then
+                mean_total_all = weighted_total_sum / real(total_total_weight, dp)
+                variance_total_all = max(0.0_dp, weighted_total_sq_sum / real(total_total_weight, dp) - mean_total_all * mean_total_all)
+            else
+                mean_total_all = 0.0_dp
+                variance_total_all = 0.0_dp
+                min_total_energy = huge_marker
             end if
-        end do
 
-        has_low_data = (total_low_weight > 0)
-        has_high_data = (total_high_weight > 0)
+            call write_level_outputs(level, total_sites, unique_count, unique_subsets, unique_deg, unique_low, unique_high, .true.)
 
-        call emit_side_statistics('lado Si', 'SI', level, best_count_si, best_energy_si, best_subsets_si, best_values_si, best_deg_si, total_sites, config, min_low_energy, mean_low_all, variance_low_all, entropy_low, has_low_data)
-        call emit_side_statistics('lado Ge', 'GE', level, best_count_ge, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, total_sites, config, min_high_energy, mean_high_all, variance_high_all, entropy_high, has_high_data)
+            boltzmann_mean_low = mean_low_all
+            boltzmann_variance_low = variance_low_all
+            boltzmann_mean_high = mean_high_all
+            boltzmann_variance_high = variance_high_all
+            boltzmann_mean_total = mean_total_all
+            boltzmann_variance_total = variance_total_all
 
-        call append_normalized_summary('sod_boltzmann_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
-             boltzmann_variance_total, boltzmann_mean_low, min_low_energy, boltzmann_mean_high, min_high_energy, expected_mix, &
-             delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix, &
-             accept_ratio)
+            if (total_low_weight > 0) then
+                boltzmann_reference_low = min_low_energy
+                if (boltzmann_reference_low >= huge_marker) boltzmann_reference_low = mean_low_all
+                boltzmann_low_weight_sum = 0.0_dp
+                boltzmann_low_energy_sum = 0.0_dp
+                boltzmann_low_energy_sq_sum = 0.0_dp
+                do idx = 1, unique_count
+                    if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
+                        degeneracy_weight = real(unique_deg(idx), dp)
+                        boltzmann_factor = exp(-(unique_low(idx) - boltzmann_reference_low) / (kB_eVk * boltzmann_temperature))
+                        boltzmann_low_weight_sum = boltzmann_low_weight_sum + degeneracy_weight * boltzmann_factor
+                        boltzmann_low_energy_sum = boltzmann_low_energy_sum + degeneracy_weight * boltzmann_factor * unique_low(idx)
+                        boltzmann_low_energy_sq_sum = boltzmann_low_energy_sq_sum + degeneracy_weight * boltzmann_factor * unique_low(idx) * unique_low(idx)
+                    end if
+                end do
+                if (boltzmann_low_weight_sum > 0.0_dp) then
+                    boltzmann_mean_low = boltzmann_low_energy_sum / boltzmann_low_weight_sum
+                    boltzmann_variance_low = max(0.0_dp, boltzmann_low_energy_sq_sum / boltzmann_low_weight_sum - boltzmann_mean_low * boltzmann_mean_low)
+                end if
+            end if
 
-    deallocate(unique_subsets)
-    deallocate(unique_low)
-    deallocate(unique_high)
-    deallocate(unique_deg)
-    deallocate(unique_low_contrib)
-    deallocate(unique_high_contrib)
-    deallocate(best_subsets_si)
-    deallocate(best_subsets_ge)
-    deallocate(best_values_si)
-    deallocate(best_values_ge)
-    deallocate(best_deg_si)
-    deallocate(best_deg_ge)
-    deallocate(subset)
-    deallocate(canonical_subset)
+            if (total_high_weight > 0) then
+                boltzmann_reference_high = min_high_energy
+                if (boltzmann_reference_high >= huge_marker) boltzmann_reference_high = mean_high_all
+                boltzmann_high_weight_sum = 0.0_dp
+                boltzmann_high_energy_sum = 0.0_dp
+                boltzmann_high_energy_sq_sum = 0.0_dp
+                do idx = 1, unique_count
+                    if (unique_high(idx) /= sentinel_energy .and. abs(unique_high(idx)) < huge_marker) then
+                        degeneracy_weight = real(unique_deg(idx), dp)
+                        boltzmann_factor = exp(-(unique_high(idx) - boltzmann_reference_high) / (kB_eVk * boltzmann_temperature))
+                        boltzmann_high_weight_sum = boltzmann_high_weight_sum + degeneracy_weight * boltzmann_factor
+                        boltzmann_high_energy_sum = boltzmann_high_energy_sum + degeneracy_weight * boltzmann_factor * unique_high(idx)
+                        boltzmann_high_energy_sq_sum = boltzmann_high_energy_sq_sum + degeneracy_weight * boltzmann_factor * unique_high(idx) * unique_high(idx)
+                    end if
+                end do
+                if (boltzmann_high_weight_sum > 0.0_dp) then
+                    boltzmann_mean_high = boltzmann_high_energy_sum / boltzmann_high_weight_sum
+                    boltzmann_variance_high = max(0.0_dp, boltzmann_high_energy_sq_sum / boltzmann_high_weight_sum - boltzmann_mean_high * boltzmann_mean_high)
+                end if
+            end if
+
+            if (total_total_weight > 0) then
+                boltzmann_reference_total = min_total_energy
+                if (boltzmann_reference_total >= huge_marker) boltzmann_reference_total = mean_total_all
+                boltzmann_total_weight_sum = 0.0_dp
+                boltzmann_total_energy_sum = 0.0_dp
+                boltzmann_total_energy_sq_sum = 0.0_dp
+                do idx = 1, unique_count
+                    degeneracy_weight = real(unique_deg(idx), dp)
+                    combined_energy = combined_energy_value(unique_low(idx), unique_high(idx), weight_low, weight_high)
+                    if (combined_energy < huge_marker) then
+                        boltzmann_factor = exp(-(combined_energy - boltzmann_reference_total) / (kB_eVk * boltzmann_temperature))
+                        boltzmann_total_weight_sum = boltzmann_total_weight_sum + degeneracy_weight * boltzmann_factor
+                        boltzmann_total_energy_sum = boltzmann_total_energy_sum + degeneracy_weight * boltzmann_factor * combined_energy
+                        boltzmann_total_energy_sq_sum = boltzmann_total_energy_sq_sum + degeneracy_weight * boltzmann_factor * combined_energy * combined_energy
+                    end if
+                end do
+                if (boltzmann_total_weight_sum > 0.0_dp) then
+                    boltzmann_mean_total = boltzmann_total_energy_sum / boltzmann_total_weight_sum
+                    boltzmann_variance_total = max(0.0_dp, boltzmann_total_energy_sq_sum / boltzmann_total_weight_sum - boltzmann_mean_total * boltzmann_mean_total)
+                end if
+            end if
+
+            if (total_low_weight > 0) then
+                entropy_low = kB_eVk * log(real(total_low_weight, dp))
+                ts_low = entropy_low * temp_targets
+                free_energy_low = boltzmann_mean_low - ts_low
+                deltaF_quartz_si = quartz_relative(level, total_sites, free_energy_low(1))
+            else
+                entropy_low = 0.0_dp
+                ts_low = 0.0_dp
+                free_energy_low = 0.0_dp
+                deltaF_quartz_si = 0.0_dp
+            end if
+
+            if (total_high_weight > 0) then
+                entropy_high = kB_eVk * log(real(total_high_weight, dp))
+                ts_high = entropy_high * temp_targets
+                free_energy_high = boltzmann_mean_high - ts_high
+                deltaF_quartz_ge = quartz_relative(level, total_sites, free_energy_high(1))
+            else
+                entropy_high = 0.0_dp
+                ts_high = 0.0_dp
+                free_energy_high = 0.0_dp
+                deltaF_quartz_ge = 0.0_dp
+            end if
+
+            if (total_degeneracy_weight > 0) then
+                entropy_total = kB_eVk * log(real(total_degeneracy_weight, dp))
+            else
+                entropy_total = 0.0_dp
+            end if
+
+            if (min_low_energy >= huge_marker) min_low_energy = mean_low_all
+            if (min_high_energy >= huge_marker) min_high_energy = mean_high_all
+            if (min_total_energy >= huge_marker) min_total_energy = mean_total_all
+
+            if (total_low_weight > 0 .and. total_high_weight > 0) then
+                expected_mix = weight_low * boltzmann_mean_low + weight_high * boltzmann_mean_high
+            else if (total_low_weight > 0) then
+                expected_mix = boltzmann_mean_low
+            else if (total_high_weight > 0) then
+                expected_mix = boltzmann_mean_high
+            else
+                expected_mix = boltzmann_mean_total
+            end if
+
+            valid_low = (total_low_weight > 0)
+            valid_high = (total_high_weight > 0)
+            valid_total = (total_total_weight > 0)
+            delta_exp_total = merge(quartz_relative(level, total_sites, boltzmann_mean_total), 0.0_dp, valid_total)
+            delta_min_total = merge(quartz_relative(level, total_sites, min_total_energy), 0.0_dp, valid_total)
+            delta_exp_low = merge(quartz_relative(level, total_sites, boltzmann_mean_low), 0.0_dp, valid_low)
+            delta_min_low = merge(quartz_relative(level, total_sites, min_low_energy), 0.0_dp, valid_low)
+            delta_exp_high = merge(quartz_relative(level, total_sites, boltzmann_mean_high), 0.0_dp, valid_high)
+            delta_min_high = merge(quartz_relative(level, total_sites, min_high_energy), 0.0_dp, valid_high)
+            delta_exp_mix = quartz_relative(level, total_sites, expected_mix)
+            accept_ratio = 1.0_dp
+
+            do idx = 1, unique_count
+                if (unique_low(idx) /= sentinel_energy .and. abs(unique_low(idx)) < huge_marker) then
+                    call update_best_structures_side(level, unique_subsets(1:level, idx), unique_low(idx), unique_deg(idx), tol, best_energy_si, best_subsets_si, best_values_si, best_deg_si, best_count_si, capacity_si, eqmatrix_local, nop_local)
+                end if
+                if (unique_high(idx) /= sentinel_energy .and. abs(unique_high(idx)) < huge_marker) then
+                    call update_best_structures_side(level, unique_subsets(1:level, idx), unique_high(idx), unique_deg(idx), tol, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, best_count_ge, capacity_ge, eqmatrix_local, nop_local)
+                end if
+            end do
+
+            has_low_data = (total_low_weight > 0)
+            has_high_data = (total_high_weight > 0)
+
+            call emit_side_statistics('lado Si', 'SI', level, best_count_si, best_energy_si, best_subsets_si, best_values_si, best_deg_si, total_sites, config, min_low_energy, mean_low_all, variance_low_all, entropy_low, has_low_data)
+            call emit_side_statistics('lado Ge', 'GE', level, best_count_ge, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, total_sites, config, min_high_energy, mean_high_all, variance_high_all, entropy_high, has_high_data)
+
+            call append_normalized_summary('sod_boltzmann_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
+                 boltzmann_variance_total, boltzmann_mean_low, min_low_energy, boltzmann_mean_high, min_high_energy, expected_mix, &
+                 delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix, &
+                 accept_ratio)
+        end if
+
+    if (allocated(unique_subsets)) deallocate(unique_subsets)
+    if (allocated(unique_low)) deallocate(unique_low)
+    if (allocated(unique_high)) deallocate(unique_high)
+    if (allocated(unique_deg)) deallocate(unique_deg)
+    if (allocated(unique_low_contrib)) deallocate(unique_low_contrib)
+    if (allocated(unique_high_contrib)) deallocate(unique_high_contrib)
+    if (allocated(best_subsets_si)) deallocate(best_subsets_si)
+    if (allocated(best_subsets_ge)) deallocate(best_subsets_ge)
+    if (allocated(best_values_si)) deallocate(best_values_si)
+    if (allocated(best_values_ge)) deallocate(best_values_ge)
+    if (allocated(best_deg_si)) deallocate(best_deg_si)
+    if (allocated(best_deg_ge)) deallocate(best_deg_ge)
+    if (allocated(subset)) deallocate(subset)
+    if (allocated(canonical_subset)) deallocate(canonical_subset)
     if (allocated(eqmatrix_local)) deallocate(eqmatrix_local)
     end subroutine process_level_exact
 
@@ -924,31 +942,37 @@ contains
         call flush(output_unit)
     end subroutine write_exact_poscar_with_tag
 
-    subroutine write_level_outputs(level, total_sites, unique_count, unique_subsets, unique_deg, unique_low, unique_high)
+    subroutine write_level_outputs(level, total_sites, unique_count, unique_subsets, unique_deg, unique_low, unique_high, write_energy_file)
         implicit none
         integer, intent(in) :: level, total_sites, unique_count
         integer, intent(in) :: unique_subsets(:,:), unique_deg(:)
         real(dp), intent(in) :: unique_low(:), unique_high(:)
+        logical, intent(in) :: write_energy_file
         character(len=64) :: outsod_name, energies_name
         character(len=32) :: low_field, high_field
         integer :: unit_outsod, unit_energy
         integer :: idx, site
         integer, allocatable :: subset(:)
         real(dp), parameter :: huge_marker = huge(1.0_dp) * 0.5_dp
+        logical :: energy_open
 
         write(outsod_name,'("OUTSOD_N",I4.4)') level
         write(energies_name,'("ENERGIES_N",I4.4)') level
 
         open(newunit=unit_outsod, file=trim(outsod_name), status='replace', action='write')
-        open(newunit=unit_energy, file=trim(energies_name), status='replace', action='write')
+        energy_open = .false.
+        if (write_energy_file) then
+            open(newunit=unit_energy, file=trim(energies_name), status='replace', action='write')
+            energy_open = .true.
+        end if
 
         write(unit_outsod,'(I12,"  substitutions in",I12," sites")') level, total_sites
         write(unit_outsod,'(I12,"  configurations")') unique_count
-        write(unit_energy,'(A)') '# idx degeneracy energy_Si_eV energy_Ge_eV'
+        if (energy_open) write(unit_energy,'(A)') '# idx degeneracy energy_Si_eV energy_Ge_eV'
 
         if (unique_count <= 0) then
             close(unit_outsod)
-            close(unit_energy)
+            if (energy_open) close(unit_energy)
             return
         end if
 
@@ -964,23 +988,25 @@ contains
             end if
             write(unit_outsod,*)
 
-            if (abs(unique_low(idx)) < huge_marker) then
-                write(low_field,'(F18.8)') unique_low(idx)
-            else
-                low_field = 'NaN'
-            end if
-            if (abs(unique_high(idx)) < huge_marker) then
-                write(high_field,'(F18.8)') unique_high(idx)
-            else
-                high_field = 'NaN'
-            end if
+            if (energy_open) then
+                if (abs(unique_low(idx)) < huge_marker) then
+                    write(low_field,'(F18.8)') unique_low(idx)
+                else
+                    low_field = 'NaN'
+                end if
+                if (abs(unique_high(idx)) < huge_marker) then
+                    write(high_field,'(F18.8)') unique_high(idx)
+                else
+                    high_field = 'NaN'
+                end if
 
-            write(unit_energy,'(I6,1X,I12,2(1X,A))') idx, unique_deg(idx), adjustl(low_field), adjustl(high_field)
+                write(unit_energy,'(I6,1X,I12,2(1X,A))') idx, unique_deg(idx), adjustl(low_field), adjustl(high_field)
+            end if
         end do
 
         if (allocated(subset)) deallocate(subset)
         close(unit_outsod)
-        close(unit_energy)
+        if (energy_open) close(unit_energy)
     end subroutine write_level_outputs
 
     subroutine append_normalized_summary(filename, level, frac_ge, e_exp_total, e_min_total, var_total, e_exp_low, e_min_low, &
