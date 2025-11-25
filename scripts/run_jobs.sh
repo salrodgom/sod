@@ -13,6 +13,7 @@
 
 # Orchestrates the end-to-end pipeline that converts *.vasp files to GULP inputs
 # and executes the calculations while respecting per-core and global limits.
+
 set -euo pipefail
 
 # Returns the number of GULP processes currently running on the machine.
@@ -56,6 +57,8 @@ wait_for_slot() {
 		sleep 0.2
 	done
 }
+
+# main:
 # Discover the list of CPU cores that will be used to pin each GULP process.
 if [ -z "${SOD_GULP_CPUS:-}" ]; then
 	total_cores=$(nproc)

@@ -24,8 +24,8 @@ program sod_boltzmann_mc
     integer, parameter :: max_exact_combos = 200000
     integer, parameter :: mix_n = 6
     integer, parameter :: mix_m = 12
-    integer, parameter :: uniform_unique_cap = 1000
-    integer, parameter :: uniform_unique_min_cap = 250
+    integer, parameter :: uniform_unique_cap = 100
+    integer, parameter :: uniform_unique_min_cap = 25
     real(dp), parameter :: uniform_cap_shrink = 0.75_dp
     real(dp), parameter :: mix_x0 = 0.5_dp
     real(dp), parameter :: mix_d0 = 0.01_dp
@@ -54,13 +54,16 @@ program sod_boltzmann_mc
     integer :: level, effective_max
     integer :: level_idx
     logical :: has_level_overrides
+    logical :: allow_parallel_levels
+    logical :: effective_use_parallel
+    logical :: force_parallel_lists
     
     use_parallel = .false.
     omp_available = .false.
     !$  use_parallel = .true.
     !$  omp_available = .true.
     
-    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling, level_overrides, has_level_overrides)
+    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling, level_overrides, has_level_overrides, force_parallel_lists)
     call configure_random_seed(seed_value)
     call configure_restart_mode(force_restart_accept)
     
@@ -73,6 +76,8 @@ program sod_boltzmann_mc
     if (allocated(eqmatrix)) deallocate(eqmatrix)
     
     call init_summary_files(summary_unit, summary_txt_unit)
+    allow_parallel_levels = use_parallel
+    effective_use_parallel = use_parallel
     
     if (max_substitutions < 0) then
         effective_max = total_sites
@@ -85,6 +90,16 @@ program sod_boltzmann_mc
         if (.not. allocated(level_targets)) then
             write(*,'(A)') 'Error: la lista de niveles especificada en -N no contiene valores válidos.'
             stop 1
+        end if
+        if (allow_parallel_levels .and. .not. force_parallel_lists) then
+            write(*,'(A)') 'Aviso: se desactiva el paralelismo externo para respetar el orden de -N.'
+            allow_parallel_levels = .false.
+            if (effective_use_parallel) then
+                write(*,'(A)') 'Aviso: el muestreo por nivel se ejecutará en modo secuencial para mayor estabilidad.'
+                effective_use_parallel = .false.
+            end if
+        else if (force_parallel_lists .and. allow_parallel_levels) then
+            write(*,'(A)') 'Aviso: se mantiene el paralelismo con lista explícita (--parallel-lists); los resultados pueden llegar fuera de orden.'
         end if
     else
         if (level_max < 0) then
@@ -112,7 +127,7 @@ program sod_boltzmann_mc
     write(*,'(A)') 'Resultados por nivel guardados en: '//trim(summary_filename)
     write(*,'(A)') '                               y: '//trim(summary_txt_filename)
     write(*,'(A)') 'Método de muestreo MC (si aplica): '//trim(sampling_mode)
-    write(*,'(A)') 'OpenMP paralelo: '//merge('Si','No',use_parallel)
+    write(*,'(A)') 'OpenMP paralelo: '//merge('Si','No',effective_use_parallel)
     write(*,'(A)') 'Forzar muestreo MC: '//merge('Si','No',force_mc_sampling)
     if (use_parallel) then
         write(*,'(A)') 'Nota: las salidas por nivel pueden imprimirse en orden no secuencial durante el cálculo paralelo.'
@@ -120,7 +135,7 @@ program sod_boltzmann_mc
     end if
     write(*,*)
     
-    if (use_parallel) then
+    if (allow_parallel_levels) then
         !$omp parallel default(shared) private(local_config, level, level_idx)
         allocate(local_config(total_sites))
         if (has_level_overrides) then
@@ -128,14 +143,14 @@ program sod_boltzmann_mc
             do level_idx = 1, size(level_targets)
                 level = level_targets(level_idx)
                 call process_level(level, total_sites, local_config, temperature, samples_per_level, &
-                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+                max_exact_combos, sampling_mode, force_mc_sampling, effective_use_parallel, summary_unit, summary_txt_unit)
             end do
             !$omp end do
         else
             !$omp do schedule(dynamic)
             do level = level_start, level_end
                 call process_level(level, total_sites, local_config, temperature, samples_per_level, &
-                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+                max_exact_combos, sampling_mode, force_mc_sampling, effective_use_parallel, summary_unit, summary_txt_unit)
             end do
             !$omp end do
         end if
@@ -147,12 +162,12 @@ program sod_boltzmann_mc
             do level_idx = 1, size(level_targets)
                 level = level_targets(level_idx)
                 call process_level(level, total_sites, config, temperature, samples_per_level, &
-                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+                max_exact_combos, sampling_mode, force_mc_sampling, effective_use_parallel, summary_unit, summary_txt_unit)
             end do
         else
             do level = level_start, level_end
                 call process_level(level, total_sites, config, temperature, samples_per_level, &
-                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+                max_exact_combos, sampling_mode, force_mc_sampling, effective_use_parallel, summary_unit, summary_txt_unit)
             end do
         end if
         deallocate(config)
@@ -165,7 +180,7 @@ program sod_boltzmann_mc
 contains
     
     ! Parses optional command-line arguments and populates runtime parameters.
-    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc, level_list, has_level_list)
+    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc, level_list, has_level_list, force_parallel_lists)
         real(dp), intent(out) :: temp
         integer, intent(out) :: level_min, level_max, max_subs, samples_level, seed
         character(len=*), intent(out) :: sampler
@@ -174,6 +189,7 @@ contains
         logical, intent(out) :: force_mc
         integer, allocatable, intent(out) :: level_list(:)
         logical, intent(out) :: has_level_list
+        logical, intent(out) :: force_parallel_lists
         integer :: argc, ios, i, j, colon_pos
         character(len=256) :: carg, lowered, spec
         character(len=256), allocatable :: args(:)
@@ -192,6 +208,7 @@ contains
         sampler = 'uniform'
         force_mc = .false.
         has_level_list = .false.
+        force_parallel_lists = .false.
         
         argc = command_argument_count()
         if (argc <= 0) return
@@ -216,6 +233,10 @@ contains
             if (trim(lowered) == '--force-mc' .or. trim(lowered) == '--force_mc' .or. &
             trim(lowered) == 'force-mc' .or. trim(lowered) == 'forcemc') then
                 force_mc = .true.
+                skip(i) = .true.
+            else if (trim(lowered) == '--parallel-lists' .or. trim(lowered) == '--parallel_lists' .or. &
+            trim(lowered) == 'parallel-lists' .or. trim(lowered) == 'parallellists') then
+                force_parallel_lists = .true.
                 skip(i) = .true.
             end if
         end do
@@ -505,6 +526,7 @@ subroutine print_usage(omp_available)
     write(*,'(A)') ''
     write(*,'(A)') 'Argumentos opcionales (por defecto entre corchetes):'
     write(*,'(A)') '  -N espec   Rango o lista: -N 5 (solo 5), -N 3:8 (3 a 8), -N 12,30,45 (lista puntual).'
+    write(*,'(A)') '  --parallel-lists   Mantiene OpenMP incluso con listas de -N (puede alterar el orden).' 
     write(*,'(A)') '  T_K        Temperatura en Kelvin para los pesos de Boltzmann [1000].'
     write(*,'(A)') '  Nmax       Número máximo de sustituciones evaluadas cuando no se usa -N [-1 -> todos].'
     write(*,'(A)') '  Nsamples   Muestras MC por nivel cuando C(N,npos) supera el umbral [5000].'
