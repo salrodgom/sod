@@ -48,15 +48,19 @@ program sod_boltzmann_mc
     integer :: level_start, level_end
     
     integer, allocatable :: eqmatrix(:,:), config(:), local_config(:)
+    integer, allocatable :: level_overrides(:)
+    integer, allocatable :: level_targets(:)
     integer :: nop, total_sites
     integer :: level, effective_max
+    integer :: level_idx
+    logical :: has_level_overrides
     
     use_parallel = .false.
     omp_available = .false.
     !$  use_parallel = .true.
     !$  omp_available = .true.
     
-    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling)
+    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling, level_overrides, has_level_overrides)
     call configure_random_seed(seed_value)
     call configure_restart_mode(force_restart_accept)
     
@@ -76,22 +80,33 @@ program sod_boltzmann_mc
         effective_max = min(max_substitutions, total_sites)
     end if
     
-    if (level_max < 0) then
-        level_start = max(0, level_min)
-        level_end = effective_max
+    if (has_level_overrides) then
+        call finalize_level_overrides(level_overrides, level_targets, total_sites)
+        if (.not. allocated(level_targets)) then
+            write(*,'(A)') 'Error: la lista de niveles especificada en -N no contiene valores válidos.'
+            stop 1
+        end if
     else
-        level_start = max(0, min(level_min, total_sites))
-        level_end = min(level_max, total_sites)
+        if (level_max < 0) then
+            level_start = max(0, level_min)
+            level_end = effective_max
+        else
+            level_start = max(0, min(level_min, total_sites))
+            level_end = min(level_max, total_sites)
+        end if
+        if (level_end > effective_max) level_end = effective_max
+        if (level_start > level_end) level_start = level_end
     end if
-    
-    if (level_end > effective_max) level_end = effective_max
-    if (level_start > level_end) level_start = level_end
     
     write(*,'(A)') '--- Parámetros del cálculo ---'
     write(*,'(A,F10.2)') 'Temperatura (K): ', temperature
     write(*,'(A,I6)') 'Sitios sustituibles (npos): ', total_sites
     write(*,'(A,I6)') 'Max sustituciones evaluadas: ', effective_max
-    write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_start, ' .. ', level_end
+    if (has_level_overrides) then
+        call print_level_overrides(level_targets)
+    else
+        write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_start, ' .. ', level_end
+    end if
     write(*,'(A,I8)') 'Umbral enumeración exacta: ', max_exact_combos
     write(*,'(A,I8)') 'Muestras aleatorias (si se supera el umbral): ', samples_per_level
     write(*,'(A)') 'Resultados por nivel guardados en: '//trim(summary_filename)
@@ -109,19 +124,35 @@ program sod_boltzmann_mc
         !$omp parallel default(shared) private(local_config)
         allocate(local_config(total_sites))
         !$omp do schedule(dynamic)
-        do level = level_start, level_end
-            call process_level(level, total_sites, local_config, temperature, samples_per_level, &
-            max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
-        end do
+        if (has_level_overrides) then
+            do level_idx = 1, size(level_targets)
+                level = level_targets(level_idx)
+                call process_level(level, total_sites, local_config, temperature, samples_per_level, &
+                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+            end do
+        else
+            do level = level_start, level_end
+                call process_level(level, total_sites, local_config, temperature, samples_per_level, &
+                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+            end do
+        end if
         !$omp end do
         deallocate(local_config)
         !$omp end parallel
     else
         allocate(config(total_sites))
-        do level = level_start, level_end
-            call process_level(level, total_sites, config, temperature, samples_per_level, &
-            max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
-        end do
+        if (has_level_overrides) then
+            do level_idx = 1, size(level_targets)
+                level = level_targets(level_idx)
+                call process_level(level, total_sites, config, temperature, samples_per_level, &
+                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+            end do
+        else
+            do level = level_start, level_end
+                call process_level(level, total_sites, config, temperature, samples_per_level, &
+                max_exact_combos, sampling_mode, force_mc_sampling, use_parallel, summary_unit, summary_txt_unit)
+            end do
+        end if
         deallocate(config)
     end if
     
@@ -132,19 +163,23 @@ program sod_boltzmann_mc
 contains
     
     ! Parses optional command-line arguments and populates runtime parameters.
-    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc)
+    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc, level_list, has_level_list)
         real(dp), intent(out) :: temp
         integer, intent(out) :: level_min, level_max, max_subs, samples_level, seed
         character(len=*), intent(out) :: sampler
         logical, intent(inout) :: use_parallel
         logical, intent(in) :: omp_available
         logical, intent(out) :: force_mc
+        integer, allocatable, intent(out) :: level_list(:)
+        logical, intent(out) :: has_level_list
         integer :: argc, ios, i, j, colon_pos
         character(len=256) :: carg, lowered, spec
         character(len=256), allocatable :: args(:)
         logical, allocatable :: skip(:)
         logical :: found_range, handled
         logical :: temp_set, max_subs_set, samples_set, seed_set, sampler_set, omp_set
+        character(len=512) :: spec_trim
+        integer :: list_status
         
         temp = 1000.0_dp
         level_min = 0
@@ -154,6 +189,7 @@ contains
         seed = -1
         sampler = 'uniform'
         force_mc = .false.
+        has_level_list = .false.
         
         argc = command_argument_count()
         if (argc <= 0) return
@@ -177,140 +213,199 @@ contains
             end do
             if (trim(lowered) == '--force-mc' .or. trim(lowered) == '--force_mc' .or. &
             trim(lowered) == 'force-mc' .or. trim(lowered) == 'forcemc') then
-            force_mc = .true.
-            skip(i) = .true.
-        end if
-    end do
-    
-    found_range = .false.
-    do i = 1, argc
-        if (skip(i)) cycle
-        lowered = adjustl(args(i))
-        do j = 1, len_trim(lowered)
-            if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
-        end do
-        if (trim(lowered) == '-n') then
-            if (i == argc) then
-                write(error_unit,'(A)') 'Error: falta especificación después de -N.'
-                call print_usage(omp_available)
-                stop 1
+                force_mc = .true.
+                skip(i) = .true.
             end if
-            spec = adjustl(args(i+1))
-            colon_pos = index(spec, ':')
-            if (colon_pos > 0) then
-                read(spec(1:colon_pos-1),*,iostat=ios) level_min
-                if (ios /= 0) then
-                    write(error_unit,'(A)') 'Error: límite inferior inválido en -N.'
+        end do
+        
+        found_range = .false.
+        do i = 1, argc
+            if (skip(i)) cycle
+            lowered = adjustl(args(i))
+            do j = 1, len_trim(lowered)
+                if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
+            end do
+            if (trim(lowered) == '-n') then
+                if (i == argc) then
+                    write(error_unit,'(A)') 'Error: falta especificación después de -N.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                read(spec(colon_pos+1:),*,iostat=ios) level_max
-                if (ios /= 0) then
-                    write(error_unit,'(A)') 'Error: límite superior inválido en -N.'
-                    call print_usage(omp_available)
-                    stop 1
-                end if
-            else
-                read(spec,*,iostat=ios) level_min
-                if (ios /= 0) then
-                    write(error_unit,'(A)') 'Error: especificación de nivel inválida en -N.'
-                    call print_usage(omp_available)
-                    stop 1
-                end if
-                if (level_min < 0) then
+                spec = adjustl(args(i+1))
+                spec_trim = adjustl(spec)
+                colon_pos = index(spec_trim, ':')
+                if (index(spec_trim, ',') > 0) then
+                    call parse_level_list(spec_trim, level_list, list_status)
+                    if (list_status /= 0) then
+                        write(error_unit,'(A)') 'Error: especificación de lista inválida en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
+                    has_level_list = .true.
                     level_min = 0
                     level_max = -1
+                else if (colon_pos > 0) then
+                    read(spec_trim(1:colon_pos-1),*,iostat=ios) level_min
+                    if (ios /= 0) then
+                        write(error_unit,'(A)') 'Error: límite inferior inválido en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
+                    read(spec_trim(colon_pos+1:),*,iostat=ios) level_max
+                    if (ios /= 0) then
+                        write(error_unit,'(A)') 'Error: límite superior inválido en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
                 else
-                    level_max = level_min
+                    read(spec_trim,*,iostat=ios) level_min
+                    if (ios /= 0) then
+                        write(error_unit,'(A)') 'Error: especificación de nivel inválida en -N.'
+                        call print_usage(omp_available)
+                        stop 1
+                    end if
+                    if (level_min < 0) then
+                        level_min = 0
+                        level_max = -1
+                    else
+                        level_max = level_min
+                    end if
+                end if
+                skip(i) = .true.
+                if (i < argc) skip(i+1) = .true.
+                found_range = .true.
+            end if
+        end do
+        temp_set = .false.
+        max_subs_set = .false.
+        samples_set = .false.
+        seed_set = .false.
+        sampler_set = .false.
+        omp_set = .false.
+        do i = 1, argc
+            if (skip(i)) cycle
+            carg = args(i)
+            handled = .false.
+            
+            lowered = adjustl(carg)
+            do j = 1, len_trim(lowered)
+                if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
+            end do
+            
+            if (.not. sampler_set) then
+                if (trim(lowered) == 'uniform' .or. trim(lowered) == 'metropolis') then
+                    sampler = trim(lowered)
+                    sampler_set = .true.
+                    handled = .true.
                 end if
             end if
-            skip(i) = .true.
-            if (i < argc) skip(i+1) = .true.
-            found_range = .true.
-        end if
-    end do
-    temp_set = .false.
-    max_subs_set = .false.
-    samples_set = .false.
-    seed_set = .false.
-    sampler_set = .false.
-    omp_set = .false.
-    do i = 1, argc
-        if (skip(i)) cycle
-        carg = args(i)
-        handled = .false.
-        
-        lowered = adjustl(carg)
-        do j = 1, len_trim(lowered)
-            if (lowered(j:j) >= 'A' .and. lowered(j:j) <= 'Z') lowered(j:j) = achar(iachar(lowered(j:j)) + 32)
+            
+            if (.not. handled .and. .not. omp_set) then
+                if (trim(lowered) == 'omp' .or. trim(lowered) == 'noomp' .or. trim(lowered) == 'o' .or. trim(lowered) == 'no' .or. &
+                trim(lowered) == 'true' .or. trim(lowered) == 'false' .or. trim(lowered) == '1' .or. trim(lowered) == '0') then
+                    call parse_omp_flag(carg, use_parallel, omp_available)
+                    omp_set = .true.
+                    handled = .true.
+                end if
+            end if
+            
+            if (.not. handled .and. .not. temp_set) then
+                read(carg,*,iostat=ios) temp
+                if (ios == 0) then
+                    temp_set = .true.
+                    handled = .true.
+                end if
+            end if
+            
+            if (.not. handled .and. .not. max_subs_set) then
+                read(carg,*,iostat=ios) max_subs
+                if (ios == 0) then
+                    max_subs_set = .true.
+                    handled = .true.
+                end if
+            end if
+            
+            if (.not. handled .and. .not. samples_set) then
+                read(carg,*,iostat=ios) samples_level
+                if (ios == 0) then
+                    if (samples_level <= 0) then
+                        write(error_unit,'(A)') 'Advertencia: Nsamples debe ser positivo, se usan 5000 muestras'
+                        samples_level = 5000
+                    end if
+                    samples_set = .true.
+                    handled = .true.
+                end if
+            end if
+            
+            if (.not. handled .and. .not. seed_set) then
+                read(carg,*,iostat=ios) seed
+                if (ios == 0) then
+                    seed_set = .true.
+                    handled = .true.
+                end if
+            end if
+            
+            if (.not. handled) then
+                write(error_unit,'(A)') 'Advertencia: argumento ignorado -> '//trim(carg)
+            end if
         end do
         
-        if (.not. sampler_set) then
-            if (trim(lowered) == 'uniform' .or. trim(lowered) == 'metropolis') then
-                sampler = trim(lowered)
-                sampler_set = .true.
-                handled = .true.
-            end if
+        if (.not. found_range .and. level_max >= 0) then
+            if (level_min < 0) level_min = 0
         end if
         
-        if (.not. handled .and. .not. omp_set) then
-            if (trim(lowered) == 'omp' .or. trim(lowered) == 'noomp' .or. trim(lowered) == 'o' .or. trim(lowered) == 'no' .or. &
-            trim(lowered) == 'true' .or. trim(lowered) == 'false' .or. trim(lowered) == '1' .or. trim(lowered) == '0') then
-            call parse_omp_flag(carg, use_parallel, omp_available)
-            omp_set = .true.
-            handled = .true.
-        end if
-    end if
-    
-    if (.not. handled .and. .not. temp_set) then
-        read(carg,*,iostat=ios) temp
-        if (ios == 0) then
-            temp_set = .true.
-            handled = .true.
-        end if
-    end if
-    
-    if (.not. handled .and. .not. max_subs_set) then
-        read(carg,*,iostat=ios) max_subs
-        if (ios == 0) then
-            max_subs_set = .true.
-            handled = .true.
-        end if
-    end if
-    
-    if (.not. handled .and. .not. samples_set) then
-        read(carg,*,iostat=ios) samples_level
-        if (ios == 0) then
-            if (samples_level <= 0) then
-                write(error_unit,'(A)') 'Advertencia: Nsamples debe ser positivo, se usan 5000 muestras'
-                samples_level = 5000
+        if (allocated(args)) deallocate(args)
+        if (allocated(skip)) deallocate(skip)
+        return
+        
+    contains
+        subroutine parse_level_list(spec_in, out_levels, status)
+            character(len=*), intent(in) :: spec_in
+            integer, allocatable, intent(out) :: out_levels(:)
+            integer, intent(out) :: status
+            character(len=512) :: buffer
+            character(len=256) :: token
+            integer :: length, count, pos, start_idx, idx, val
+            status = 0
+            buffer = trim(spec_in)
+            length = len_trim(buffer)
+            if (length <= 0) then
+                status = 1
+                return
             end if
-            samples_set = .true.
-            handled = .true.
-        end if
-    end if
-    
-    if (.not. handled .and. .not. seed_set) then
-        read(carg,*,iostat=ios) seed
-        if (ios == 0) then
-            seed_set = .true.
-            handled = .true.
-        end if
-    end if
-    
-    if (.not. handled) then
-        write(error_unit,'(A)') 'Advertencia: argumento ignorado -> '//trim(carg)
-    end if
-end do
-
-if (.not. found_range .and. level_max >= 0) then
-    ! no explicit -N but level_max was set via defaults; ensure consistent state
-    if (level_min < 0) level_min = 0
-end if
-
-if (allocated(args)) deallocate(args)
-if (allocated(skip)) deallocate(skip)
-end subroutine parse_arguments
+            if (buffer(1:1) == ',' .or. buffer(length:length) == ',') then
+                status = 1
+                return
+            end if
+            count = 1
+            do pos = 1, length
+                if (buffer(pos:pos) == ',') then
+                    if (pos < length .and. buffer(pos+1:pos+1) == ',') then
+                        status = 1
+                        return
+                    end if
+                    count = count + 1
+                end if
+            end do
+            allocate(out_levels(count))
+            idx = 0
+            start_idx = 1
+            do pos = 1, length+1
+                if (pos > length .or. buffer(pos:pos) == ',') then
+                    idx = idx + 1
+                    token = buffer(start_idx:pos-1)
+                    token = adjustl(token)
+                    read(token,*,iostat=status) val
+                    if (status /= 0) then
+                        deallocate(out_levels)
+                        return
+                    end if
+                    out_levels(idx) = val
+                    start_idx = pos + 1
+                end if
+            end do
+        end subroutine parse_level_list
+    end subroutine parse_arguments
 
 ! Interprets an OpenMP flag token and updates the parallel execution mode.
 subroutine parse_omp_flag(raw, use_parallel, omp_available)
@@ -341,6 +436,55 @@ subroutine parse_omp_flag(raw, use_parallel, omp_available)
     end select
 end subroutine parse_omp_flag
 
+    subroutine finalize_level_overrides(raw_levels, targets, total_sites)
+        integer, allocatable, intent(inout) :: raw_levels(:)
+        integer, allocatable, intent(out) :: targets(:)
+        integer, intent(in) :: total_sites
+        integer, allocatable :: temp(:)
+        integer :: idx, valid_count, val
+        logical :: duplicate
+        
+        if (allocated(targets)) deallocate(targets)
+        if (.not. allocated(raw_levels)) return
+        allocate(temp(size(raw_levels)))
+        temp = 0
+        valid_count = 0
+        do idx = 1, size(raw_levels)
+            val = raw_levels(idx)
+            if (val < 0 .or. val > total_sites) then
+                write(*,'(A,I0,A)') 'Aviso: nivel ', val, ' fuera de rango; se omite.'
+                call flush(output_unit)
+                cycle
+            end if
+            duplicate = .false.
+            if (valid_count > 0) then
+                if (any(temp(1:valid_count) == val)) duplicate = .true.
+            end if
+            if (duplicate) cycle
+            valid_count = valid_count + 1
+            temp(valid_count) = val
+        end do
+        if (valid_count > 0) then
+            allocate(targets(valid_count))
+            targets = temp(1:valid_count)
+            call sort_int_ascending(targets, valid_count)
+        end if
+        deallocate(temp)
+        deallocate(raw_levels)
+    end subroutine finalize_level_overrides
+
+    subroutine print_level_overrides(levels)
+        integer, intent(in) :: levels(:)
+        integer :: idx
+        write(*,'(A)') 'Niveles evaluados: lista específica'
+        write(*,'(A)', advance='no') 'Valores: '
+        do idx = 1, size(levels)
+            if (idx > 1) write(*,'(A)', advance='no') ', '
+            write(*,'(I0)', advance='no') levels(idx)
+        end do
+        write(*,*)
+    end subroutine print_level_overrides
+
 ! Emits program usage information including optional OpenMP note.
 subroutine print_usage(omp_available)
     logical, intent(in) :: omp_available
@@ -357,7 +501,7 @@ subroutine print_usage(omp_available)
     write(*,'(A)') '       sod_boltzmann_mc --help'
     write(*,'(A)') ''
     write(*,'(A)') 'Argumentos opcionales (por defecto entre corchetes):'
-    write(*,'(A)') '  -N espec   Rango de niveles: -N 5 (solo nivel 5), -N 3:8 (del 3 al 8), -N -1 (todos).'
+    write(*,'(A)') '  -N espec   Rango o lista: -N 5 (solo 5), -N 3:8 (3 a 8), -N 12,30,45 (lista puntual).'
     write(*,'(A)') '  T_K        Temperatura en Kelvin para los pesos de Boltzmann [1000].'
     write(*,'(A)') '  Nmax       Número máximo de sustituciones evaluadas cuando no se usa -N [-1 -> todos].'
     write(*,'(A)') '  Nsamples   Muestras MC por nivel cuando C(N,npos) supera el umbral [5000].'
@@ -372,7 +516,7 @@ subroutine print_usage(omp_available)
     end if
     write(*,'(A)') ''
     write(*,'(A)') 'Otros detalles:'
-    write(*,'(A)') '  - El programa evalúa todos los niveles de sustitución desde N=0 hasta Nmax.'
+    write(*,'(A)') '  - Por defecto se evalúan todos los niveles desde N=0 hasta Nmax salvo que -N limite el conjunto.'
     write(*,'(A)') '  - Si C(N,npos) <= 200000 se enumeran todas las configuraciones; en caso contrario se muestrea MC.'
     write(*,'(A)') '  - El muestreo uniforme aplica control adaptativo del cupo de configuraciones únicas ' // &
     '(mínimo '//trim(cap_str)//', factor '//trim(adjustl(shrink_str))//'%).'
@@ -384,6 +528,7 @@ subroutine print_usage(omp_available)
     write(*,'(A)') '  sod_boltzmann_mc 800 6 2000 1234 metropolis omp'
     write(*,'(A)') '                                        # 800 K, hasta 6 sustituciones,'// &
     ' Metropolis y OpenMP.'
+    write(*,'(A)') '  sod_boltzmann_mc -N 12,30,45         # Evalúa solo los niveles 12, 30 y 45.'
 end subroutine print_usage
 
 ! Checks whether a token corresponds to any supported help flag.
