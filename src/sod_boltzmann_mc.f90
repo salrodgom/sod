@@ -18,7 +18,7 @@ program sod_boltzmann_mc
     use sod_calibration
     use energy_calc
     use omp_lib, only: omp_in_parallel
-    use, intrinsic :: iso_fortran_env, only: output_unit
+    use, intrinsic :: iso_fortran_env, only: output_unit, error_unit
     implicit none
     
     integer, parameter :: max_exact_combos = 200000
@@ -57,13 +57,16 @@ program sod_boltzmann_mc
     logical :: allow_parallel_levels
     logical :: effective_use_parallel
     logical :: force_parallel_lists
+    character(len=512) :: osda_gin_option
     
     use_parallel = .false.
     omp_available = .false.
     !$  use_parallel = .true.
     !$  omp_available = .true.
     
-    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling, level_overrides, has_level_overrides, force_parallel_lists)
+    osda_gin_option = 'default'
+    call parse_arguments(temperature, level_min, level_max, max_substitutions, samples_per_level, seed_value, sampling_mode, use_parallel, omp_available, force_mc_sampling, level_overrides, has_level_overrides, force_parallel_lists, osda_gin_option)
+    call set_calibration_osda_gin(trim(osda_gin_option))
     call configure_random_seed(seed_value)
     call configure_restart_mode(force_restart_accept)
     
@@ -180,7 +183,7 @@ program sod_boltzmann_mc
 contains
     
     ! Parses optional command-line arguments and populates runtime parameters.
-    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc, level_list, has_level_list, force_parallel_lists)
+    subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc, level_list, has_level_list, force_parallel_lists, osda_gin_option)
         real(dp), intent(out) :: temp
         integer, intent(out) :: level_min, level_max, max_subs, samples_level, seed
         character(len=*), intent(out) :: sampler
@@ -190,14 +193,16 @@ contains
         integer, allocatable, intent(out) :: level_list(:)
         logical, intent(out) :: has_level_list
         logical, intent(out) :: force_parallel_lists
+        character(len=*), intent(out) :: osda_gin_option
         integer :: argc, ios, i, j, colon_pos
         character(len=256) :: carg, lowered, spec
         character(len=256), allocatable :: args(:)
         logical, allocatable :: skip(:)
         logical :: found_range, handled
-        logical :: temp_set, max_subs_set, samples_set, seed_set, sampler_set, omp_set
+        logical :: temp_set, max_subs_set, samples_set, seed_set, sampler_set, omp_set, osda_set
         character(len=512) :: spec_trim
         integer :: list_status
+        integer :: eq_pos
         
         temp = 1000.0_dp
         level_min = 0
@@ -209,6 +214,8 @@ contains
         force_mc = .false.
         has_level_list = .false.
         force_parallel_lists = .false.
+        osda_gin_option = 'default'
+        osda_set = .false.
         
         argc = command_argument_count()
         if (argc <= 0) return
@@ -237,6 +244,31 @@ contains
             else if (trim(lowered) == '--parallel-lists' .or. trim(lowered) == '--parallel_lists' .or. &
             trim(lowered) == 'parallel-lists' .or. trim(lowered) == 'parallellists') then
                 force_parallel_lists = .true.
+                skip(i) = .true.
+            else if (index(trim(lowered), '--osda-gin=') == 1) then
+                eq_pos = index(args(i), '=')
+                if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
+                    write(error_unit,'(A)') 'Error: argumento inválido para --osda-gin.'
+                    call print_usage(omp_available)
+                    stop 1
+                end if
+                osda_gin_option = adjustl(args(i)(eq_pos+1:))
+                osda_set = .true.
+                skip(i) = .true.
+            else if (trim(lowered) == '--osda-gin' .or. trim(lowered) == '--osda_gin') then
+                if (i == argc) then
+                    write(error_unit,'(A)') 'Error: falta ruta después de --osda-gin.'
+                    call print_usage(omp_available)
+                    stop 1
+                end if
+                osda_gin_option = adjustl(args(i+1))
+                osda_set = .true.
+                skip(i) = .true.
+                skip(i+1) = .true.
+            else if (trim(lowered) == '--no-osda-gin' .or. trim(lowered) == '--skip-osda' .or. &
+                 trim(lowered) == '--skip_osda') then
+                osda_gin_option = 'none'
+                osda_set = .true.
                 skip(i) = .true.
             end if
         end do
@@ -305,6 +337,7 @@ contains
         seed_set = .false.
         sampler_set = .false.
         omp_set = .false.
+        if (.not. osda_set) osda_gin_option = 'default'
         do i = 1, argc
             if (skip(i)) cycle
             carg = args(i)
@@ -527,6 +560,8 @@ subroutine print_usage(omp_available)
     write(*,'(A)') 'Argumentos opcionales (por defecto entre corchetes):'
     write(*,'(A)') '  -N espec   Rango o lista: -N 5 (solo 5), -N 3:8 (3 a 8), -N 12,30,45 (lista puntual).'
     write(*,'(A)') '  --parallel-lists   Mantiene OpenMP incluso con listas de -N (puede alterar el orden).' 
+    write(*,'(A)') '  --osda-gin <fichero>  Usa el archivo OSDA indicado al generar .gin (default: OSDA_ITW.gin).'
+    write(*,'(A)') '  --no-osda-gin        Evita añadir fragmentos OSDA a los .gin creados.'
     write(*,'(A)') '  T_K        Temperatura en Kelvin para los pesos de Boltzmann [1000].'
     write(*,'(A)') '  Nmax       Número máximo de sustituciones evaluadas cuando no se usa -N [-1 -> todos].'
     write(*,'(A)') '  Nsamples   Muestras MC por nivel cuando C(N,npos) supera el umbral [5000].'

@@ -15,8 +15,8 @@
 set -euo pipefail
 
 # Validate inputs and capture the path to the structure that must be converted.
-if [ $# -ne 1 ]; then
-	echo "Uso: $0 fichero.vasp" >&2
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+	echo "Uso: $0 fichero.vasp [osda.gin]" >&2
 	exit 1
 fi
 file="$1"
@@ -24,6 +24,7 @@ if [ ! -f "$file" ]; then
 	echo "Error: no existe el fichero $file" >&2
 	exit 1
 fi
+osda_include="${2:-}"
 
 # Candidate ASE executables searched in order before falling back to PATH lookups.
 ase_candidates=(
@@ -191,52 +192,14 @@ frac
 EOF
 
 sed -n '/^_atom_site_charge$/,$p' "$cif_path" | sed '/_atom_site_charge/d' | sed '/^[[:space:]]*$/d' | awk '{print $1 " core",$3,$4,$5}' >>"$gin_path"
-
+if [ -n "$osda_include" ]; then
+	if [ ! -f "$osda_include" ]; then
+		echo "Error: no se encontró el archivo OSDA $osda_include" >&2
+		exit 1
+	fi
+	cat "$osda_include" >> "$gin_path"
+fi
 cat >>"$gin_path" <<EOF
-F  core 0.488968 0.476240 0.451806
-F  core 0.996818 0.965041 0.422429
-H1 core 0.410910 0.852615 0.163309
-H1 core 0.573027 0.768482 0.426451
-H1 core 0.543502 0.813574 0.599641
-H1 core 0.404860 0.774465 0.449804
-C1 core 0.510940 0.973266 0.474277
-C1 core 0.437683 0.907460 0.242695
-C2 core 0.503190 0.806491 0.474336
-N1 core 0.486139 0.894237 0.401668
-H1 core 0.913057 0.355881 0.186550
-H1 core 0.907375 0.277853 0.475420
-H1 core 0.926017 0.655554 0.485094
-H1 core 0.954148 0.666324 0.297178
-C1 core 0.934256 0.499336 0.241946
-C1 core 0.939336 0.410718 0.266054
-C2 core 0.989788 0.635305 0.410881
-N1 core 0.988094 0.397409 0.424947
-N1 core 0.980179 0.539264 0.386201
-H1 core 0.902980 0.537821 0.136747
-H1 core 0.631912 0.939609 0.700701
-H1 core 0.976091 0.493288 0.720539
-H1 core 1.073579 0.271293 0.446191
-H1 core 1.049209 0.316198 0.622006
-H1 core 1.094414 0.654046 0.461555
-C1 core 1.012654 0.476428 0.497702
-C2 core 1.005870 0.309461 0.497113
-C2 core 1.060695 0.493015 0.667327
-H1 core 1.110789 0.557246 0.688064
-H1 core 1.132846 0.442661 0.724544
-H1 core 0.429305 1.151864 0.467072
-H1 core 0.447840 1.163373 0.275079
-H1 core 0.594080 1.150953 0.432599
-C1 core 0.433031 0.996066 0.218436
-C2 core 0.488720 1.132103 0.387729
-N1 core 0.478728 1.036054 0.362711
-C2 core 0.559366 0.989840 0.643851
-H1 core 0.401975 1.034503 0.113158
-H1 core 0.609122 1.054186 0.664500
-H1 core 0.475051 0.989761 0.697534
-
-space
-P 1
-
 species
 Ge core  Ge core
 Si core  Si core
@@ -253,45 +216,6 @@ C1 core  C1 core
 H1 core  H1 core
 N1 core  N1 core
 end
-
-connect 75 80 single  0 0 0
-connect 76 81 single  0 0 0
-connect 77 81 single  0 0 0
-connect 78 81 single  0 0 0
-connect 79 82 resonant  0 0 0
-connect 79 108 resonant  0 0 0
-connect 79 109 single  0 0 0
-connect 80 82 resonant  0 0 0
-connect 80 106 resonant  0 0 0
-connect 81 82 single  0 0 0
-connect 83 88 single  0 0 0
-connect 84 99 single  0 0 0
-connect 85 89 single  0 0 0
-connect 86 89 single  0 0 0
-connect 87 88 resonant  0 0 0
-connect 87 91 resonant  0 0 0
-connect 87 92 single  0 0 0
-connect 88 90 resonant  0 0 0
-connect 89 91 single  0 0 0
-connect 89 97 single  0 0 0
-connect 90 98 resonant  0 0 0
-connect 90 99 single  0 0 0
-connect 91 98 resonant  0 0 0
-connect 93 109 single  0 0 0
-connect 94 100 single  0 0 0
-connect 95 99 single  0 0 0
-connect 96 99 single  0 0 0
-connect 98 100 single  0 0 0
-connect 100 101 single  0 0 0
-connect 100 102 single  0 0 0
-connect 103 107 single  0 0 0
-connect 104 107 single  0 0 0
-connect 105 107 single  0 0 0
-connect 106 108 resonant  0 0 0
-connect 106 110 single  0 0 0
-connect 107 108 single  0 0 0
-connect 109 111 single  0 0 0
-connect 109 112 single  0 0 0
 
 library Germanate_OSDA
 switch_minimiser rfo gnorm 0.01

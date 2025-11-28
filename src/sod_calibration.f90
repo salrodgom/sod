@@ -9,8 +9,60 @@ module sod_calibration
     implicit none
     private
     public :: calibrate_level_with_gulp, canonicalize_subset, find_subset_index, evaluate_subsets_with_gulp
+    public :: set_calibration_osda_gin
+
+    integer, parameter :: osda_mode_default = 0
+    integer, parameter :: osda_mode_none    = 1
+    integer, parameter :: osda_mode_custom  = 2
+    integer, save :: osda_mode = osda_mode_default
+    character(len=512), save :: osda_gin_override = ''
 
 contains
+
+    pure function to_lower(text) result(out)
+        character(len=*), intent(in) :: text
+        character(len=len(text)) :: out
+        integer :: idx, code
+
+        out = text
+        do idx = 1, len(text)
+            code = iachar(out(idx:idx))
+            if (code >= iachar('A') .and. code <= iachar('Z')) then
+                out(idx:idx) = achar(code + 32)
+            end if
+        end do
+    end function to_lower
+
+    subroutine set_calibration_osda_gin(path)
+        character(len=*), intent(in) :: path
+        character(len=512) :: cleaned
+        character(len=512) :: lowered
+        logical :: exists
+
+        cleaned = adjustl(path)
+        if (len_trim(cleaned) == 0) then
+            osda_mode = osda_mode_default
+            osda_gin_override = ''
+            return
+        end if
+
+        lowered = to_lower(trim(cleaned))
+        if (trim(lowered) == 'default') then
+            osda_mode = osda_mode_default
+            osda_gin_override = ''
+        else if (trim(lowered) == 'none' .or. trim(lowered) == 'off' .or. trim(lowered) == 'skip') then
+            osda_mode = osda_mode_none
+            osda_gin_override = ''
+        else
+            osda_mode = osda_mode_custom
+            osda_gin_override = trim(cleaned)
+            inquire(file=trim(osda_gin_override), exist=exists)
+            if (.not. exists) then
+                write(error_unit,'(A)') 'Error: archivo OSDA no encontrado: '//trim(osda_gin_override)
+                stop 1
+            end if
+        end if
+    end subroutine set_calibration_osda_gin
 
     subroutine calibrate_level_with_gulp(level, total_sites, unique_count, unique_subsets, unique_low_contrib, unique_high_contrib, unique_deg, unique_low, unique_high, config, do_low_calibration, do_high_calibration)
         implicit none
@@ -601,11 +653,28 @@ contains
         character(len=*), intent(in) :: script_dir
         character(len=*), intent(in) :: calib_dir
         integer :: exit_code
+        character(len=1024) :: command
 
-        call execute_command_line('cp ' // trim(script_dir)//'/vasp2gin.sh ' // trim(calib_dir), exitstat=exit_code)
-        call execute_command_line('cp ' // trim(script_dir)//'/run_jobs.sh ' // trim(calib_dir), exitstat=exit_code)
-        call execute_command_line('cp ' // trim(script_dir)//'/extract.sh ' // trim(calib_dir), exitstat=exit_code)
-        call execute_command_line('chmod +x ' // trim(calib_dir)//'/vasp2gin.sh ' // trim(calib_dir)//'/run_jobs.sh ' // trim(calib_dir)//'/extract.sh', exitstat=exit_code)
+        command = 'cp "' // trim(script_dir)//'/vasp2gin.sh" "' // trim(calib_dir)//'/vasp2gin.sh"'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        command = 'cp "' // trim(script_dir)//'/run_jobs.sh" "' // trim(calib_dir)//'/run_jobs.sh"'
+        call execute_command_line(trim(command), exitstat=exit_code)
+        command = 'cp "' // trim(script_dir)//'/extract.sh" "' // trim(calib_dir)//'/extract.sh"'
+        call execute_command_line(trim(command), exitstat=exit_code)
+
+        select case (osda_mode)
+        case (osda_mode_default)
+            command = 'cp "' // trim(script_dir)//'/OSDA_ITW.gin" "' // trim(calib_dir)//'/OSDA_ITW.gin"'
+            call execute_command_line(trim(command), exitstat=exit_code)
+        case (osda_mode_custom)
+            command = 'cp "' // trim(osda_gin_override) // '" "' // trim(calib_dir)//'/osda_payload.gin"'
+            call execute_command_line(trim(command), exitstat=exit_code)
+        case (osda_mode_none)
+            continue
+        end select
+
+        command = 'chmod +x "' // trim(calib_dir)//'/vasp2gin.sh" "' // trim(calib_dir)//'/run_jobs.sh" "' // trim(calib_dir)//'/extract.sh"'
+        call execute_command_line(trim(command), exitstat=exit_code)
     end subroutine copy_calibration_scripts
 
     subroutine solve_normal_equations(mat, rhs, coeff, ok)

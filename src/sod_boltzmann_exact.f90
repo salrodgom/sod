@@ -13,6 +13,7 @@ program sod_boltzmann_exact
     integer :: level_min, level_max
     real(dp) :: energy_tolerance
     logical :: just_outsod
+    character(len=512) :: osda_gin_option
     integer :: nop, total_sites
     integer, allocatable :: eqmatrix(:,:)
     integer, allocatable :: scratch_config(:)
@@ -25,7 +26,8 @@ program sod_boltzmann_exact
     real(dp), parameter :: mix_x0 = 0.5_dp
     real(dp), parameter :: mix_d0 = 0.01_dp
 
-    call parse_arguments_exact(level_min, level_max, energy_tolerance, just_outsod)
+    call parse_arguments_exact(level_min, level_max, energy_tolerance, just_outsod, osda_gin_option)
+    call set_calibration_osda_gin(trim(osda_gin_option))
 
     call init_energy_calc()
     call get_eqmatrix(eqmatrix, nop, total_sites)
@@ -64,27 +66,61 @@ program sod_boltzmann_exact
     call cleanup_energy_calc()
 contains
 
-    subroutine parse_arguments_exact(level_min, level_max, tol, just_outsod)
+    subroutine parse_arguments_exact(level_min, level_max, tol, just_outsod, osda_gin_option)
         implicit none
         integer, intent(out) :: level_min, level_max
         real(dp), intent(out) :: tol
         logical, intent(out) :: just_outsod
+        character(len=*), intent(out) :: osda_gin_option
         integer :: argc, iarg, colon_pos, ios
-        character(len=256) :: arg, spec
+        character(len=256) :: arg, spec, lowered
         integer :: level_candidate, lower, upper
         real(dp) :: tol_candidate
         logical :: level_specified
+        integer :: idx, eq_pos
 
         level_min = 0
         level_max = -1
         tol = 1.0e-6_dp
         just_outsod = .false.
         level_specified = .false.
+        osda_gin_option = 'default'
 
         argc = command_argument_count()
         iarg = 1
         do while (iarg <= argc)
             call get_command_argument(iarg, arg)
+            lowered = adjustl(arg)
+            do idx = 1, len_trim(lowered)
+                if (lowered(idx:idx) >= 'A' .and. lowered(idx:idx) <= 'Z') then
+                    lowered(idx:idx) = achar(iachar(lowered(idx:idx)) + 32)
+                end if
+            end do
+            if (index(trim(lowered), '--osda-gin=') == 1 .or. index(trim(lowered), '--osda_gin=') == 1) then
+                eq_pos = index(arg, '=')
+                if (eq_pos <= 0 .or. eq_pos == len_trim(arg)) then
+                    write(*,'(A)') 'Error: argumento inválido para --osda-gin.'
+                    call print_usage_exact()
+                    stop 1
+                end if
+                osda_gin_option = adjustl(arg(eq_pos+1:))
+                iarg = iarg + 1
+                cycle
+            else if (trim(lowered) == '--osda-gin' .or. trim(lowered) == '--osda_gin') then
+                if (iarg + 1 > argc) then
+                    write(*,'(A)') 'Error: falta ruta después de --osda-gin.'
+                    call print_usage_exact()
+                    stop 1
+                end if
+                call get_command_argument(iarg + 1, osda_gin_option)
+                osda_gin_option = adjustl(osda_gin_option)
+                iarg = iarg + 2
+                cycle
+            else if (trim(lowered) == '--no-osda-gin' .or. trim(lowered) == '--skip-osda' .or. trim(lowered) == '--skip_osda') then
+                osda_gin_option = 'none'
+                iarg = iarg + 1
+                cycle
+            end if
             if (is_help_token(arg)) then
                 call print_usage_exact()
                 stop 0
@@ -176,6 +212,8 @@ contains
         write(*,'(A)') '             -N 12      : Sólo el nivel 12'
         write(*,'(A)') '             -N 1:12    : Rango del nivel 1 al 12 (inclusive)'
         write(*,'(A)') '  --just-outsod  Genera solo OUTSOD_Nxxxx (sin ENERGIES ni POSCAR).'
+        write(*,'(A)') '  --osda-gin <fichero>  Usa el fragmento OSDA indicado (por defecto OSDA_ITW.gin).'
+        write(*,'(A)') '  --no-osda-gin        Omite cualquier fragmento OSDA al crear los .gin.'
         write(*,'(A)') ''
         write(*,'(A)') '  tol_eV     Tolerancia en energía (eV) para considerar configuraciones'
         write(*,'(A)') '             equivalentes [por defecto: 1e-6].'

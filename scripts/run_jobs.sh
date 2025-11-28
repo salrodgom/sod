@@ -95,10 +95,23 @@ declare -a SLOT_PIDS
 for idx in "${!CPU_ARRAY[@]}"; do
 	SLOT_PIDS[$idx]=''
 done
+
+OSDA_GIN_FILE="${SOD_OSDA_GIN_FILE:-}"
+if [ -z "$OSDA_GIN_FILE" ]; then
+	if [ -f "osda_payload.gin" ]; then
+		OSDA_GIN_FILE="./osda_payload.gin"
+	elif [ -f "OSDA_ITW.gin" ]; then
+		OSDA_GIN_FILE="./OSDA_ITW.gin"
+	fi
+fi
 # Convert every VASP file to a GULP input and launch the calculation pinned to one core.
 for vasp in *.vasp; do
 	[ -e "$vasp" ] || continue
-	bash vasp2gin.sh "$vasp"
+	if [ -n "$OSDA_GIN_FILE" ]; then
+		bash vasp2gin.sh "$vasp" "$OSDA_GIN_FILE"
+	else
+		bash vasp2gin.sh "$vasp"
+	fi
 	slot=$(wait_for_slot)
 	cpu=${CPU_ARRAY[$slot]}
 	echo "[run_jobs] Ejecutando $vasp.gin en CPU $cpu"
