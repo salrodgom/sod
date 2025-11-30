@@ -13,6 +13,11 @@
 
 # Collects the final lattice energy from every *.vasp.gout file and writes them to ENERGIES.
 for f in *.vasp.gout; do
+	# skip files that indicate non-converged minimum
+	if grep -qF 'Conditions for a minimum have not been satisfied.' "$f"; then
+	    echo "N/A # $f"
+		continue
+	fi
 	x=$(grep 'l e' "$f" | tail -n1 | awk '{print $4}')
 	echo "$x # $f"
 done > ENERGIES

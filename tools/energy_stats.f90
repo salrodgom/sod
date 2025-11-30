@@ -147,10 +147,12 @@ contains
         integer :: unit, ios, ios_read, count, idx
         character(len=512) :: line, buffer
         real(dp) :: value, sum_e, sum_sq, mean, variance, stddev
+        real(dp) :: sum_cub, sum_quart, skew, kurt
         real(dp) :: emin, emax
         real(dp), allocatable :: values(:)
         real(dp), allocatable :: weights(:)
         real(dp) :: kB, ref_energy, w_sum, w_mean, w_variance, w_std, lnz
+        real(dp) :: w_m3, w_m4, w_skew, w_kurt
 
         open(newunit=unit, file=filename, status='old', action='read', iostat=ios)
         if (ios /= 0) then
@@ -201,6 +203,20 @@ contains
         mean = sum_e / real(count, dp)
         variance = max(0.0_dp, (sum_sq / real(count, dp)) - mean * mean)
         stddev = sqrt(variance)
+        ! Momentos centrados para skewness y curtosis (equiprobable)
+        sum_cub = 0.0_dp
+        sum_quart = 0.0_dp
+        do idx = 1, count
+            sum_cub = sum_cub + (values(idx) - mean)**3
+            sum_quart = sum_quart + (values(idx) - mean)**4
+        end do
+        if (variance > 0.0_dp) then
+            skew = sum_cub / real(count, dp) / (stddev**3)
+            kurt = sum_quart / real(count, dp) / (stddev**4)
+        else
+            skew = 0.0_dp
+            kurt = 0.0_dp
+        end if
         emin = minval(values)
         emax = maxval(values)
 
@@ -210,6 +226,8 @@ contains
         write(*,'(A,F18.8)') '  E_max: ', emax
         write(*,'(A,F18.8)') '  <E> (media): ', mean
         write(*,'(A,F18.8)') '  Desviacion estandar: ', stddev
+        write(*,'(A,F18.8)') '  Asimetria (skewness): ', skew
+        write(*,'(A,F18.8)') '  Curtosis: ', kurt
 
         if (use_weighting) then
             kB = 8.617333262145e-5_dp
@@ -228,10 +246,22 @@ contains
                 w_variance = sum(weights * (values - w_mean)**2) / w_sum
                 w_variance = max(0.0_dp, w_variance)
                 w_std = sqrt(w_variance)
+                ! Momentos ponderados para skewness y curtosis Boltzmann
+                w_m3 = sum(weights * (values - w_mean)**3) / w_sum
+                w_m4 = sum(weights * (values - w_mean)**4) / w_sum
+                if (w_variance > 0.0_dp) then
+                    w_skew = w_m3 / (w_std**3)
+                    w_kurt = w_m4 / (w_std**4)
+                else
+                    w_skew = 0.0_dp
+                    w_kurt = 0.0_dp
+                end if
                 lnz = log(w_sum) - ref_energy / (kB * temperature)
                 write(*,'(A,F12.2)') '  Temperatura (K): ', temperature
                 write(*,'(A,F18.8)') '  <E>_Boltzmann: ', w_mean
                 write(*,'(A,F18.8)') '  Sigma_Boltzmann: ', w_std
+                write(*,'(A,F18.8)') '  Asimetria_Boltzmann: ', w_skew
+                write(*,'(A,F18.8)') '  Curtosis_Boltzmann: ', w_kurt
                 write(*,'(A,F18.8)') '  ln(Z): ', lnz
             end if
         end if
