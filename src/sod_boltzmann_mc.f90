@@ -24,8 +24,8 @@ program sod_boltzmann_mc
     integer, parameter :: max_exact_combos = 200000
     integer, parameter :: mix_n = 6
     integer, parameter :: mix_m = 12
-    integer, parameter :: uniform_unique_cap = 100
-    integer, parameter :: uniform_unique_min_cap = 25
+    integer, parameter :: uniform_unique_cap = 1000
+    integer, parameter :: uniform_unique_min_cap = 250
     real(dp), parameter :: uniform_cap_shrink = 0.75_dp
     real(dp), parameter :: mix_x0 = 0.5_dp
     real(dp), parameter :: mix_d0 = 0.01_dp
