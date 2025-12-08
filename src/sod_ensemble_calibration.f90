@@ -1,9 +1,9 @@
 !*******************************************************************************
-!  Common calibration routines shared between SOD Boltzmann drivers.
+!  Common calibration routines shared between SOD ensemble drivers.
 !*******************************************************************************
-module sod_calibration
-    use sod_boltzmann_consts
-    use sod_boltzmann_utils
+module sod_ensemble_calibration
+    use sod_ensemble_consts
+    use sod_ensemble_utils
     use energy_calc
     use, intrinsic :: iso_fortran_env, only: output_unit, error_unit
     implicit none
@@ -11,10 +11,10 @@ module sod_calibration
     public :: calibrate_level_with_gulp, canonicalize_subset, find_subset_index, evaluate_subsets_with_gulp
     public :: set_calibration_osda_gin
 
-    integer, parameter :: osda_mode_default = 0
+    integer, parameter :: osda_mode_builtin = 0
     integer, parameter :: osda_mode_none    = 1
     integer, parameter :: osda_mode_custom  = 2
-    integer, save :: osda_mode = osda_mode_default
+    integer, save :: osda_mode = osda_mode_none
     character(len=512), save :: osda_gin_override = ''
 
 contains
@@ -41,14 +41,14 @@ contains
 
         cleaned = adjustl(path)
         if (len_trim(cleaned) == 0) then
-            osda_mode = osda_mode_default
+            osda_mode = osda_mode_none
             osda_gin_override = ''
             return
         end if
 
         lowered = to_lower(trim(cleaned))
-        if (trim(lowered) == 'default') then
-            osda_mode = osda_mode_default
+        if (trim(lowered) == 'default' .or. trim(lowered) == 'builtin') then
+            osda_mode = osda_mode_builtin
             osda_gin_override = ''
         else if (trim(lowered) == 'none' .or. trim(lowered) == 'off' .or. trim(lowered) == 'skip') then
             osda_mode = osda_mode_none
@@ -654,6 +654,7 @@ contains
         character(len=*), intent(in) :: calib_dir
         integer :: exit_code
         character(len=1024) :: command
+        logical :: exists
 
         command = 'cp "' // trim(script_dir)//'/vasp2gin.sh" "' // trim(calib_dir)//'/vasp2gin.sh"'
         call execute_command_line(trim(command), exitstat=exit_code)
@@ -663,9 +664,14 @@ contains
         call execute_command_line(trim(command), exitstat=exit_code)
 
         select case (osda_mode)
-        case (osda_mode_default)
-            command = 'cp "' // trim(script_dir)//'/OSDA_ITW.gin" "' // trim(calib_dir)//'/OSDA_ITW.gin"'
-            call execute_command_line(trim(command), exitstat=exit_code)
+        case (osda_mode_builtin)
+            inquire(file=trim(script_dir)//'/OSDA_ITW.gin', exist=exists)
+            if (exists) then
+                command = 'cp "' // trim(script_dir)//'/OSDA_ITW.gin" "' // trim(calib_dir)//'/OSDA_ITW.gin"'
+                call execute_command_line(trim(command), exitstat=exit_code)
+            else
+                write(*,'(A)') 'Aviso: no se encontro OSDA_ITW.gin en '//trim(script_dir)//'; se omite.'
+            end if
         case (osda_mode_custom)
             command = 'cp "' // trim(osda_gin_override) // '" "' // trim(calib_dir)//'/osda_payload.gin"'
             call execute_command_line(trim(command), exitstat=exit_code)
@@ -732,4 +738,4 @@ contains
         ok = .true.
     end subroutine solve_normal_equations
 
-end module sod_calibration
+end module sod_ensemble_calibration

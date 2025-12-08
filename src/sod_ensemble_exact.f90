@@ -2,92 +2,104 @@
 !  Exhaustive enumeration driver that prints all minimum-energy configurations
 !  for each substitution level found via the SOD energy calculator.
 !*******************************************************************************
-program sod_boltzmann_exact
-    use sod_boltzmann_consts
-    use sod_boltzmann_utils
+module sod_ensemble_exact_mod
+    use sod_ensemble_consts
+    use sod_ensemble_utils
+    use sod_ensemble_config, only: mixing_weight, quartz_relative
+    use sod_ensemble_symmetry
     use energy_calc
-    use sod_calibration
+    use sod_ensemble_calibration
     use, intrinsic :: iso_fortran_env, only: output_unit
     implicit none
 
-    integer :: level_min, level_max
-    real(dp) :: energy_tolerance
-    logical :: just_outsod
-    character(len=512) :: osda_gin_option
-    integer :: nop, total_sites
-    integer, allocatable :: eqmatrix(:,:)
-    integer, allocatable :: scratch_config(:)
-    integer :: level
-    real(dp), parameter :: conv_ev_to_kjmol = 96.48533212331_dp
-    real(dp), parameter :: quartz_ge_energy = -121.812200998519_dp
-    real(dp), parameter :: quartz_si_energy = -128.799143746482_dp
-    integer, parameter :: mix_n = 6
-    integer, parameter :: mix_m = 12
-    real(dp), parameter :: mix_x0 = 0.5_dp
-    real(dp), parameter :: mix_d0 = 0.01_dp
-
-    call parse_arguments_exact(level_min, level_max, energy_tolerance, just_outsod, osda_gin_option)
-    call set_calibration_osda_gin(trim(osda_gin_option))
-
-    call init_energy_calc()
-    call get_eqmatrix(eqmatrix, nop, total_sites)
-    if (.not. allocated(eqmatrix) .or. total_sites <= 0) then
-        write(*,'(A)') 'Error: no se pudo obtener EQMATRIX o no hay sitios sustituibles.'
-        stop 1
-    end if
-    if (allocated(eqmatrix)) deallocate(eqmatrix)
-
-    ! Adjust range based on actual number of sites
-    if (level_min < 0) level_min = 0
-    if (level_max < 0) level_max = total_sites
-    level_min = min(level_min, total_sites)
-    level_max = min(level_max, total_sites)
-    if (level_min > level_max) then
-        write(*,'(A)') 'Error: rango de niveles inválido (min > max).'
-        stop 1
-    end if
-
-    allocate(scratch_config(total_sites))
-    write(*,'(A)') '--- Enumeración exhaustiva de configuraciones ---'
-    write(*,'(A,I0)') 'Sitios sustituibles (npos): ', total_sites
-    write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_min, ' .. ', level_max
-    write(*,'(A,ES12.5)') 'Tolerancia para agrupar mínimos (eV): ', energy_tolerance
-    if (just_outsod) then
-        write(*,'(A)') 'Modo --just-outsod activo: solo se generarán archivos OUTSOD_Nxxxx.'
-        write(*,'(A)') 'Se omiten ENERGIES_Nxxxx, POSCAR_* y resúmenes energéticos.'
-    end if
-    write(*,*)
-    call flush(output_unit)
-
-    do level = level_min, level_max
-        call process_level_exact(level, total_sites, scratch_config, energy_tolerance, just_outsod)
-    end do
-    deallocate(scratch_config)
-    call cleanup_energy_calc()
 contains
 
-    subroutine parse_arguments_exact(level_min, level_max, tol, just_outsod, osda_gin_option)
+    subroutine run_sod_ensemble_exact(arg_offset)
+        integer, intent(in), optional :: arg_offset
+        integer :: level_min, level_max
+        real(dp) :: energy_tolerance
+        logical :: just_outsod
+        character(len=512) :: osda_gin_option
+        integer :: nop, total_sites
+        integer, pointer :: eqmatrix(:,:)
+        integer, allocatable :: scratch_config(:)
+        integer :: level
+        if (present(arg_offset)) then
+            call parse_arguments_exact(level_min, level_max, energy_tolerance, just_outsod, osda_gin_option, arg_offset)
+        else
+            call parse_arguments_exact(level_min, level_max, energy_tolerance, just_outsod, osda_gin_option)
+        end if
+        call set_calibration_osda_gin(trim(osda_gin_option))
+
+        call init_energy_calc()
+        call symmetry_initialize()
+        call symmetry_get_matrix(eqmatrix, nop, total_sites)
+        if (.not. associated(eqmatrix) .or. total_sites <= 0) then
+            write(*,'(A)') 'Error: no se pudo obtener EQMATRIX o no hay sitios sustituibles.'
+            stop 1
+        end if
+        nullify(eqmatrix)
+
+        ! Adjust range based on actual number of sites
+        if (level_min < 0) level_min = 0
+        if (level_max < 0) level_max = total_sites
+        level_min = min(level_min, total_sites)
+        level_max = min(level_max, total_sites)
+        if (level_min > level_max) then
+            write(*,'(A)') 'Error: rango de niveles inválido (min > max).'
+            stop 1
+        end if
+
+        allocate(scratch_config(total_sites))
+        write(*,'(A)') '--- Enumeración exhaustiva de configuraciones ---'
+        write(*,'(A,I0)') 'Sitios sustituibles (npos): ', total_sites
+        write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_min, ' .. ', level_max
+        write(*,'(A,ES12.5)') 'Tolerancia para agrupar mínimos (eV): ', energy_tolerance
+        if (just_outsod) then
+            write(*,'(A)') 'Modo --just-outsod activo: solo se generarán archivos OUTSOD_Nxxxx.'
+            write(*,'(A)') 'Se omiten ENERGIES_Nxxxx, POSCAR_* y resúmenes energéticos.'
+        end if
+        write(*,*)
+        call flush(output_unit)
+
+        do level = level_min, level_max
+            call process_level_exact(level, total_sites, scratch_config, energy_tolerance, just_outsod)
+        end do
+        deallocate(scratch_config)
+        call symmetry_finalize()
+        call cleanup_energy_calc()
+    end subroutine run_sod_ensemble_exact
+
+    subroutine parse_arguments_exact(level_min, level_max, tol, just_outsod, osda_gin_option, arg_offset)
         implicit none
         integer, intent(out) :: level_min, level_max
         real(dp), intent(out) :: tol
         logical, intent(out) :: just_outsod
         character(len=*), intent(out) :: osda_gin_option
+        integer, intent(in), optional :: arg_offset
         integer :: argc, iarg, colon_pos, ios
         character(len=256) :: arg, spec, lowered
         integer :: level_candidate, lower, upper
         real(dp) :: tol_candidate
         logical :: level_specified
         integer :: idx, eq_pos
+        integer :: offset
+        logical :: tol_set
 
         level_min = 0
         level_max = -1
         tol = 1.0e-6_dp
         just_outsod = .false.
         level_specified = .false.
-        osda_gin_option = 'default'
+        osda_gin_option = 'none'
+        tol_set = .false.
 
         argc = command_argument_count()
-        iarg = 1
+        offset = 0
+        if (present(arg_offset)) offset = max(0, arg_offset)
+        if (argc <= offset) return
+
+        iarg = 1 + offset
         do while (iarg <= argc)
             call get_command_argument(iarg, arg)
             lowered = adjustl(arg)
@@ -118,6 +130,40 @@ contains
                 cycle
             else if (trim(lowered) == '--no-osda-gin' .or. trim(lowered) == '--skip-osda' .or. trim(lowered) == '--skip_osda') then
                 osda_gin_option = 'none'
+                iarg = iarg + 1
+                cycle
+            else if (trim(lowered) == '-t' .or. trim(lowered) == '--tolerance') then
+                if (iarg + 1 > argc) then
+                    write(*,'(A)') 'Error: falta valor después de --tolerance.'
+                    call print_usage_exact()
+                    stop 1
+                end if
+                call get_command_argument(iarg + 1, spec)
+                read(spec, *, iostat=ios) tol_candidate
+                if (ios /= 0 .or. tol_candidate <= 0.0_dp) then
+                    write(*,'(A)') 'Error: tolerancia inválida proporcionada a --tolerance.'
+                    call print_usage_exact()
+                    stop 1
+                end if
+                tol = tol_candidate
+                tol_set = .true.
+                iarg = iarg + 2
+                cycle
+            else if (index(trim(lowered), '--tolerance=') == 1) then
+                eq_pos = index(arg, '=')
+                if (eq_pos <= 0 .or. eq_pos == len_trim(arg)) then
+                    write(*,'(A)') 'Error: argumento inválido para --tolerance.'
+                    call print_usage_exact()
+                    stop 1
+                end if
+                read(arg(eq_pos+1:), *, iostat=ios) tol_candidate
+                if (ios /= 0 .or. tol_candidate <= 0.0_dp) then
+                    write(*,'(A)') 'Error: tolerancia inválida proporcionada a --tolerance.'
+                    call print_usage_exact()
+                    stop 1
+                end if
+                tol = tol_candidate
+                tol_set = .true.
                 iarg = iarg + 1
                 cycle
             end if
@@ -195,6 +241,7 @@ contains
                     else
                         tol = tol_candidate
                     end if
+                    tol_set = .true.
                     iarg = iarg + 1
                 end if
             end select
@@ -203,26 +250,25 @@ contains
 
     subroutine print_usage_exact()
         implicit none
-        write(*,'(A)') 'Uso: sod_boltzmann_exact [-N <especificación>] [tol_eV]'
-        write(*,'(A)') '     sod_boltzmann_exact [Nmax] [tol_eV]  (modo compatibilidad)'
+        write(*,'(A)') 'Uso: sod_ensemble_exact [-N <especificación>] [-t <tol_eV>] [--just-outsod] [--osda-gin <fichero>]'
+        write(*,'(A)') '     sod_ensemble_exact [Nmax] [tol_eV]  (modo compatibilidad)'
         write(*,'(A)') ''
-        write(*,'(A)') 'Argumentos opcionales:'
+        write(*,'(A)') 'Argumentos opcionales (la sintaxis posicional clásica se mantiene para compatibilidad):'
         write(*,'(A)') '  -N <spec>  Especifica niveles de sustitución a evaluar:'
         write(*,'(A)') '             -N -1      : Todos los niveles (0..npos)'
         write(*,'(A)') '             -N 12      : Sólo el nivel 12'
         write(*,'(A)') '             -N 1:12    : Rango del nivel 1 al 12 (inclusive)'
+        write(*,'(A)') '  -t, --tolerance <tol>  Tolerancia en energía (eV) para agrupar configuraciones [1e-6].'
         write(*,'(A)') '  --just-outsod  Genera solo OUTSOD_Nxxxx (sin ENERGIES ni POSCAR).'
-        write(*,'(A)') '  --osda-gin <fichero>  Usa el fragmento OSDA indicado (por defecto OSDA_ITW.gin).'
-        write(*,'(A)') '  --no-osda-gin        Omite cualquier fragmento OSDA al crear los .gin.'
-        write(*,'(A)') ''
-        write(*,'(A)') '  tol_eV     Tolerancia en energía (eV) para considerar configuraciones'
-        write(*,'(A)') '             equivalentes [por defecto: 1e-6].'
+        write(*,'(A)') '  --osda-gin <fichero>  Añade el fragmento OSDA indicado al generar .gin.'
+        write(*,'(A)') '                         Usa "default" para copiar scripts/OSDA_ITW.gin.'
+        write(*,'(A)') '  --no-osda-gin        Omite cualquier fragmento OSDA al crear los .gin (por defecto).'
         write(*,'(A)') ''
         write(*,'(A)') 'Ejemplos:'
-        write(*,'(A)') '  sod_boltzmann_exact -N 5:10 1e-5    # Niveles 5-10, tolerancia 1e-5'
-        write(*,'(A)') '  sod_boltzmann_exact -N 8             # Sólo nivel 8'
-        write(*,'(A)') '  sod_boltzmann_exact -N -1            # Todos los niveles'
-        write(*,'(A)') '  sod_boltzmann_exact 12 1e-6          # Niveles 0-12 (modo antiguo)'
+        write(*,'(A)') '  sod_ensemble_exact -N 5:10 -t 1e-5    # Niveles 5-10, tolerancia 1e-5'
+        write(*,'(A)') '  sod_ensemble_exact -N 8              # Sólo nivel 8 (tolerancia por defecto)'
+        write(*,'(A)') '  sod_ensemble_exact -N -1             # Todos los niveles'
+        write(*,'(A)') '  sod_ensemble_exact 12 1e-6           # Niveles 0-12 (modo antiguo posicional)'
         write(*,'(A)') ''
         write(*,'(A)') 'El programa enumera exhaustivamente las combinaciones en cada nivel,'
         write(*,'(A)') 'guardando las configuraciones con energía mínima como archivos POSCAR_EXACT.'
@@ -282,7 +328,7 @@ contains
     real(dp), allocatable :: tmp_low(:), tmp_high(:)
     logical :: allow_low_estimate, allow_high_estimate
     logical :: has_low_data, has_high_data
-    integer, allocatable :: eqmatrix_local(:,:)
+    integer, pointer :: eqmatrix_local(:,:)
     character(len=80), parameter :: separator = '------------------------------------------------------------------------'
     real(dp), parameter :: sentinel_energy = huge(1.0_dp)
     real(dp), parameter :: huge_marker = huge(1.0_dp) * 0.5_dp
@@ -330,7 +376,11 @@ contains
     logical :: valid_low, valid_high, valid_total
 
         ! Get EQMATRIX for symmetry checking
-        call get_eqmatrix(eqmatrix_local, nop_local, i)
+        call symmetry_get_matrix(eqmatrix_local, nop_local, i)
+        if (.not. associated(eqmatrix_local)) then
+            write(*,'(A)') 'Error: EQMATRIX no disponible para la enumeración exacta.'
+            return
+        end if
 
         total_comb = binomial_int64(total_sites, level)
 
@@ -488,7 +538,7 @@ contains
             deallocate(tmp_high)
 
             if (just_outsod) then
-                if (allocated(eqmatrix_local)) deallocate(eqmatrix_local)
+                nullify(eqmatrix_local)
                 return
             end if
 
@@ -526,7 +576,7 @@ contains
             call emit_side_statistics('lado Si', 'SI', level, best_count_si, best_energy_si, best_subsets_si, best_values_si, best_deg_si, total_sites, config, min_low_energy, mean_low_all, variance_low_all, entropy_low, has_low_data)
             call emit_side_statistics('lado Ge', 'GE', level, best_count_ge, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, total_sites, config, min_high_energy, mean_high_all, variance_high_all, entropy_high, has_high_data)
 
-            call append_normalized_summary('sod_boltzmann_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
+            call append_normalized_summary('sod_ensemble_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
                  boltzmann_variance_total, boltzmann_mean_low, min_low_energy, boltzmann_mean_high, min_high_energy, expected_mix, &
                  delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix, &
                  accept_ratio)
@@ -537,7 +587,7 @@ contains
             deallocate(best_values_ge)
             deallocate(best_deg_si)
             deallocate(best_deg_ge)
-            if (allocated(eqmatrix_local)) deallocate(eqmatrix_local)
+            nullify(eqmatrix_local)
             return
         end if
 
@@ -861,7 +911,7 @@ contains
             call emit_side_statistics('lado Si', 'SI', level, best_count_si, best_energy_si, best_subsets_si, best_values_si, best_deg_si, total_sites, config, min_low_energy, mean_low_all, variance_low_all, entropy_low, has_low_data)
             call emit_side_statistics('lado Ge', 'GE', level, best_count_ge, best_energy_ge, best_subsets_ge, best_values_ge, best_deg_ge, total_sites, config, min_high_energy, mean_high_all, variance_high_all, entropy_high, has_high_data)
 
-            call append_normalized_summary('sod_boltzmann_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
+            call append_normalized_summary('sod_ensemble_exact.txt', level, ge_fraction, boltzmann_mean_total, min_total_energy, &
                  boltzmann_variance_total, boltzmann_mean_low, min_low_energy, boltzmann_mean_high, min_high_energy, expected_mix, &
                  delta_exp_total, delta_min_total, delta_exp_low, delta_min_low, delta_exp_high, delta_min_high, delta_exp_mix, &
                  accept_ratio)
@@ -881,7 +931,7 @@ contains
     if (allocated(best_deg_ge)) deallocate(best_deg_ge)
     if (allocated(subset)) deallocate(subset)
     if (allocated(canonical_subset)) deallocate(canonical_subset)
-    if (allocated(eqmatrix_local)) deallocate(eqmatrix_local)
+    nullify(eqmatrix_local)
     end subroutine process_level_exact
 
     subroutine emit_side_statistics(label, tag, level, count, best_energy, best_subsets, best_values, best_deg, total_sites, config, min_energy, mean_energy, variance_energy, entropy_side, has_data)
@@ -1135,44 +1185,6 @@ contains
             energy_val = limit
         end if
     end function combined_energy_value
-
-    pure real(dp) function mixing_weight(ge_fraction) result(weight)
-        implicit none
-        real(dp), intent(in) :: ge_fraction
-        real(dp) :: arg, numerator, denom_base, denominator
-        real(dp), parameter :: eps = 1.0e-8_dp
-
-        arg = (ge_fraction - mix_d0) / mix_x0
-        denom_base = 1.0_dp - arg
-        if (abs(denom_base) < eps) then
-            denom_base = merge(eps, -eps, denom_base >= 0.0_dp)
-        end if
-        denominator = denom_base**mix_m
-        numerator = 1.0_dp - arg**mix_n
-        if (abs(denominator) < eps) then
-            weight = merge(1.0_dp, 0.0_dp, numerator >= 0.0_dp)
-        else
-            weight = numerator / denominator
-        end if
-        weight = max(0.0_dp, min(1.0_dp, weight))
-    end function mixing_weight
-
-    pure real(dp) function quartz_relative(level, total_sites, energy) result(rel_val)
-        implicit none
-        integer, intent(in) :: level, total_sites
-        real(dp), intent(in) :: energy
-        real(dp) :: ge_atoms, si_atoms, denom
-
-        if (total_sites <= 0) then
-            rel_val = 0.0_dp
-            return
-        end if
-
-        ge_atoms = real(level, dp)
-        si_atoms = real(total_sites - level, dp)
-        denom = real(total_sites, dp)
-        rel_val = conv_ev_to_kjmol * (energy - ge_atoms * quartz_ge_energy - si_atoms * quartz_si_energy) / denom
-    end function quartz_relative
 
     subroutine update_best_structures(level, subset, energy, low_estimate, high_estimate, degeneracy, tol, best_energy, best_subsets, best_low, best_high, best_deg, best_count, capacity, eqmatrix, nop)
         implicit none
@@ -1591,4 +1603,4 @@ contains
         ok = .true.
     end subroutine solve_normal_equations
 
-end program sod_boltzmann_exact
+end module sod_ensemble_exact_mod

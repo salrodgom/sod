@@ -1,6 +1,8 @@
-# SOD Boltzmann Monte Carlo Estimator
+# SOD Ensemble Monte Carlo Estimator
 
 Este proyecto complementa el código SOD existente aportando una utilidad que obtiene la energía esperada de sustituciones Si→Ge mediante ponderación de Boltzmann. El programa está pensado para compilarse en el mismo entorno que los módulos Fortran del proyecto original, reutilizando rutinas como `init_energy_calc` y `calculate_structure_energy`.
+
+> Nota: a partir de esta refactorización el ejecutable principal es `sod_ensemble`, que acepta el modo `mc` para invocar internamente el mismo flujo lógico descrito aquí. El binario `sod_ensemble_mc` sigue generándose como un envoltorio compatibilizador y todos los argumentos se mantienen.
 
 ## Requisitos previos
 
@@ -14,14 +16,14 @@ Este proyecto complementa el código SOD existente aportando una utilidad que ob
 ## Compilación
 
 1. Sitúate en el directorio raíz del proyecto SOD original.
-2. Copia el archivo `src/sod_boltzmann_mc.f90` de este workspace al directorio `src/` del proyecto original (o añade la ruta correspondiente al comando de compilación).
+2. Copia el archivo `src/sod_ensemble_mc.f90` de este workspace al directorio `src/` del proyecto original (o añade la ruta correspondiente al comando de compilación).
 3. Añade el nuevo fichero a tu `Makefile` o comando de compilación, por ejemplo:
 
 ```bash
 # Ejemplo: añadir el ejecutable al Makefile existente
-MC_OBJS = sod_boltzmann_mc.o
+MC_OBJS = sod_ensemble_mc.o
 
-sod_boltzmann_mc: $(MC_OBJS) $(COMMON_OBJS)
+sod_ensemble_mc: $(MC_OBJS) $(COMMON_OBJS)
 	$(FC) $(FFLAGS) -o $@ $^
 ```
 
@@ -31,19 +33,28 @@ Asegúrate de que `$(COMMON_OBJS)` contenga `energy_calc.o` y sus dependencias.
 
 ## Uso
 
-Una vez compilado (`sod_boltzmann_mc`), ejecuta el programa desde el directorio de una simulación (donde residen `INSOD`, `SGO`, `nXX/` y en particular `n01/OUTSOD`). El programa determina el máximo número posible de sustituciones leyendo los sitios representativos listados en `n01/OUTSOD`:
+Una vez compilado (`sod_ensemble_mc`), ejecuta el programa desde el directorio de una simulación (donde residen `INSOD`, `SGO`, `nXX/` y en particular `n01/OUTSOD`). El programa determina el máximo número posible de sustituciones leyendo los sitios representativos listados en `n01/OUTSOD`:
 
 ```bash
-./sod_boltzmann_mc [temperatura_K] [max_sustituciones] [muestras] [semilla] [sampler] [omp]
+./sod_ensemble_mc -T 1000 -M 12 -C 5000 -s 1234 -a metropolis --omp -N 3:8
 ```
 
-- `temperatura_K` (opcional): temperatura en Kelvin para el peso de Boltzmann. Valor por defecto `1000 K`.
-- `max_sustituciones` (opcional): límite superior del número de sustituciones evaluadas. Por defecto se analizan todos los valores posibles.
-- `muestras` (opcional): número de configuraciones Monte Carlo evaluadas cuando el número de combinaciones supera el umbral de enumeración exacta (200000). Por defecto `5000`.
-- `semilla` (opcional): semilla entera para el generador aleatorio. Si se omite, se usa el reloj del sistema.
-- `sampler` (opcional): modo de muestreo a emplear cuando se activa Monte Carlo. Acepta `uniform` (muestras independientes sin correlación, valor por defecto) o `metropolis` (cadena de Markov con aceptación Metropolis-Hastings que lleva registro de los intentos rechazados).
-- `omp` (opcional): habilita o deshabilita el uso de OpenMP en los cálculos estadísticos. Usa `omp`/`1`/`true` para activarlo (requiere compilar con `-fopenmp`) o `noomp`/`0`/`false` para forzar la ejecución secuencial.
+Parámetros principales (puedes combinar abreviaturas cortas y largas; la sintaxis posicional clásica sigue funcionando para compatibilidad):
 
+- `-T`, `--temperature <K>`: temperatura en Kelvin para los pesos de Boltzmann. Por defecto `1000`.
+- `-M`, `--max-substitutions <N>`: máximo de sustituciones a evaluar si no se usa `-N`. Por defecto `-1` (todos los niveles permitidos por `OUTSOD`).
+- `-C`, `--samples <N>`: número de configuraciones Monte Carlo evaluadas cuando `C(N,npos)` supera el umbral de enumeración exacta (200000). Por defecto `5000`.
+- `-s`, `--seed <valor>`: semilla entera para el generador aleatorio. Si se omite o vale `-1`, se inicializa con `system_clock`.
+- `-a`, `--sampler <modo>`: modo de muestreo (`uniform` por defecto o `metropolis`).
+- `--omp` / `--no-omp`: fuerza el uso de OpenMP (requiere compilar con `-fopenmp`) o ejecuta siempre de forma secuencial.
+- `-N <spec>`: rango o lista de niveles (igual que antes: `-N 5`, `-N 3:8`, `-N 12,30,45`).
+- `--osda-gin`, `--no-osda-gin`, `--force-mc`, `--parallel-lists`: opciones adicionales idénticas a la versión anterior.
+
+Ejemplo con la sintaxis heredada (todos los argumentos posicionales):
+
+```bash
+./sod_ensemble_mc 1000 12 5000 1234 metropolis omp -N 3:8
+```
 El programa escribe en la salida estándar, para cada número de sustituciones, el número de combinaciones analizadas, si se recurrió a muestreo Monte Carlo, la energía mínima y la energía esperada (ponderada por Boltzmann), junto con la desviación estándar y la probabilidad Boltzmann de la configuración mínima.
 
 ### Enumeración vs Muestreo

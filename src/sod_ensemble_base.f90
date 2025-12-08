@@ -1,21 +1,21 @@
 !*******************************************************************************
-!  Shared Boltzmann Monte Carlo utilities: common constants and helper routines.
+!  Shared ensemble Monte Carlo utilities: common constants and helper routines.
 !*******************************************************************************
 
-module sod_boltzmann_consts
+module sod_ensemble_consts
     use iso_fortran_env, only: real64, int64, error_unit
     implicit none
     integer, parameter :: dp = real64
     integer, parameter :: ip = int64
     real(dp), parameter :: kB_eVk = 8.617333262145d-5
-end module sod_boltzmann_consts
+end module sod_ensemble_consts
 
-module sod_boltzmann_utils
-    use sod_boltzmann_consts
+module sod_ensemble_utils
+    use sod_ensemble_consts
     implicit none
 contains
 
-    ! Returns n choose k using a running product in 64-bit integers.
+    ! Devuelve "n sobre k" usando un producto acumulativo en enteros de 64 bits.
     function binomial_int64(n, k) result(val)
         integer, intent(in) :: n, k
         integer(ip) :: val
@@ -35,7 +35,7 @@ contains
         end do
     end function binomial_int64
 
-    ! Advances a sorted combination array to the next lexicographic tuple.
+    ! Avanza una combinación ordenada a la siguiente tupla lexicográfica.
     logical function next_combination(comb, n)
         integer, intent(inout) :: comb(:)
         integer, intent(in) :: n
@@ -63,7 +63,7 @@ contains
         next_combination = .true.
     end function next_combination
 
-    ! Draws a random sorted subset of size k from 1..n without replacement.
+    ! Extrae un subconjunto ordenado aleatorio de tamaño k dentro de 1..n sin reemplazo.
     subroutine random_subset(n, k, subset)
         integer, intent(in) :: n, k
         integer, intent(out) :: subset(:)
@@ -99,7 +99,7 @@ contains
         call sort_int_ascending(subset, k)
     end subroutine random_subset
 
-    ! Sorts the first length entries of an integer array via insertion sort.
+    ! Ordena los primeros "length" elementos de un vector entero mediante inserción.
     subroutine sort_int_ascending(arr, length)
         integer, intent(inout) :: arr(:)
         integer, intent(in) :: length
@@ -116,4 +116,4 @@ contains
         end do
     end subroutine sort_int_ascending
 
-end module sod_boltzmann_utils
+end module sod_ensemble_utils

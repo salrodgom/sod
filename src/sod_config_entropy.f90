@@ -4,7 +4,7 @@
 !  used to evaluate S_conf = k_B ln W for each substitution level.
 !*******************************************************************************
 program sod_config_entropy
-    use sod_boltzmann_consts
+    use sod_ensemble_consts
     use, intrinsic :: iso_fortran_env, only: output_unit, error_unit
     implicit none
 

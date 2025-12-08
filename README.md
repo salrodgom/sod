@@ -37,6 +37,23 @@ tar xzvf sod(version).tar.gz
 make all
 ```
 
+- The ensemble drivers are now available through a unified executable:
+
+```bash
+bin/sod_ensemble <mc|exact> [opciones]
+```
+
+Use `mc` to run the Monte Carlo sampler (previously `sod_boltzmann_mc`) or `exact` to enumerate exhaustively (previously `sod_boltzmann_exact`). The legacy `sod_boltzmann*` binaries remain as thin wrappers that forward to the unified entry point, so existing workflows keep working unchanged.
+
+Typical invocations now accept explícit flags so that cada argumento sea auto-documentado:
+
+```bash
+bin/sod_ensemble mc -T 800 -M 6 -C 2000 -s 1234 -a metropolis --omp -N 3:8
+bin/sod_ensemble exact -N 5:10 -t 1e-5 --just-outsod
+```
+
+Old positional syntax (`sod_ensemble mc 800 6 2000 …`) still works for compatibility, but the flagged form is recommended for scripts because it leaves claro qué valor corresponde a cada parámetro.
+
 - Add ROOTSOD/sod(version)/bin to your executables path 
 
 ```bash 
