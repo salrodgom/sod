@@ -1,4 +1,16 @@
 !*******************************************************************************
+!    Copyright (c) 2025, Salvador R.G. Balestra
+!
+!    This file is part of the SOD package.
+!
+!    SOD is free software: you can redistribute it and/or modify
+!    it under the terms of the GNU General Public License as published by
+!    the Free Software Foundation, either version 3 of the License, or
+!    (at your option) any later version.
+!
+!******************************************************************************
+
+!*******************************************************************************
 !  Setup mode: enumerates symmetry-inequivalent configurations, prepares POSCAR
 !  files per level, runs the external job pipeline, and collects energies.
 !*******************************************************************************
@@ -13,6 +25,7 @@ module sod_ensemble_setup_mod
     logical, save :: scripts_ready = .false.
     contains
 
+    !> Orchestrates setup mode: parses CLI options, enumerates levels, and launches outputs per level.
     subroutine run_sod_ensemble_setup(arg_offset)
         integer, intent(in), optional :: arg_offset
         integer :: level_min, level_max
@@ -36,22 +49,22 @@ module sod_ensemble_setup_mod
         call init_energy_calc(skip_energy_files=.true.)
         call get_eqmatrix(eqmatrix, nop, total_sites)
         if (.not. allocated(eqmatrix) .or. total_sites <= 0) then
-            write(error_unit,'(A)') 'Error: no se pudo obtener EQMATRIX o no hay sitios sustituibles.'
+            write(error_unit,'(A)') 'Error: unable to obtain EQMATRIX or no substitutable sites are available.'
             call cleanup_energy_calc()
             stop 1
         end if
 
         call build_level_sequence(level_min, level_max, level_list, has_list, total_sites, levels)
         if (.not. allocated(levels) .or. size(levels) == 0) then
-            write(error_unit,'(A)') 'Error: la especificacion -N no produjo niveles validos.'
+            write(error_unit,'(A)') 'Error: the -N specification did not generate valid levels.'
             deallocate(eqmatrix)
             call cleanup_energy_calc()
             stop 1
         end if
 
-        write(*,'(A)') '--- Setup de configuraciones exactas ---'
-        write(*,'(A,I0)') 'Sitios sustituibles (npos): ', total_sites
-        write(*,'(A)', advance='no') 'Niveles a procesar: '
+        write(*,'(A)') '--- Exact configuration setup ---'
+        write(*,'(A,I0)') 'Substitutable sites (npos): ', total_sites
+        write(*,'(A)', advance='no') 'Levels to process: '
         do i = 1, size(levels)
             write(*,'(I0)', advance='no') levels(i)
             if (i < size(levels)) write(*,'(A)', advance='no') ', '
@@ -76,6 +89,7 @@ module sod_ensemble_setup_mod
         end if
     end subroutine run_sod_ensemble_setup
 
+    !> Parses CLI arguments specific to setup mode, capturing level selectors.
     subroutine parse_setup_arguments(level_min, level_max, level_list, has_list, arg_offset)
         integer, intent(inout) :: level_min, level_max
         integer, allocatable, intent(inout) :: level_list(:)
@@ -105,7 +119,7 @@ module sod_ensemble_setup_mod
             select case (trim(lowered))
             case ('-n')
                 if (iarg + 1 > argc) then
-                    write(error_unit,'(A)') 'Error: falta especificacion despues de -N.'
+                    write(error_unit,'(A)') 'Error: missing specification after -N.'
                     call print_setup_usage()
                     stop 1
                 end if
@@ -116,25 +130,27 @@ module sod_ensemble_setup_mod
                 call print_setup_usage()
                 stop 0
             case default
-                write(error_unit,'(A)') 'Error: argumento no reconocido en modo setup. Use --help para mas informacion.'
+                write(error_unit,'(A)') 'Error: unrecognized argument in setup mode. Use --help for more information.'
                 call print_setup_usage()
                 stop 1
             end select
         end do
     end subroutine parse_setup_arguments
 
+    !> Displays usage instructions for setup mode.
     subroutine print_setup_usage()
-        write(*,'(A)') 'Uso: sod_ensemble setup -N <especificacion>'
+        write(*,'(A)') 'Usage: sod_ensemble setup -N <specification>'
         write(*,'(A)') ''
-        write(*,'(A)') '  -N, -n    Define los niveles (átomos Ge) a preparar. Acepta:'
-        write(*,'(A)') '            * un valor único (ej. 4)'
-        write(*,'(A)') '            * un rango con dos puntos (ej. 2:6)'
-        write(*,'(A)') '            * una lista separada por comas (ej. 0,3,5,7)'
+        write(*,'(A)') '  -N, -n    Defines the substitution levels (Ge atoms) to prepare. Accepts:'
+        write(*,'(A)') '            * a single value (e.g. 4)'
+        write(*,'(A)') '            * a colon-separated range (e.g. 2:6)'
+        write(*,'(A)') '            * a comma-separated list (e.g. 0,3,5,7)'
         write(*,'(A)') ''
-        write(*,'(A)') 'El modo setup genera carpetas n0X con OUTSOD, POSCARs, ejecuta run_jobs.sh y'
-        write(*,'(A)') 'extract.sh para construir el archivo ENERGIES por nivel.'
+        write(*,'(A)') 'Setup mode generates n0X folders with OUTSOD, POSCARs, runs run_jobs.sh, and'
+        write(*,'(A)') 'extract.sh to produce the ENERGIES file per level.'
     end subroutine print_setup_usage
 
+    !> Parses the -N specification, supporting single values, ranges, or comma lists.
     subroutine parse_level_spec(spec, level_min, level_max, level_list, has_list)
         character(len=*), intent(in) :: spec
         integer, intent(inout) :: level_min, level_max
@@ -150,7 +166,7 @@ module sod_ensemble_setup_mod
         comma_pos = index(spec, ',')
 
         if (colon_pos > 0 .and. comma_pos > 0) then
-            write(error_unit,'(A)') 'Error: no mezcle rangos y listas en la misma especificacion -N.'
+            write(error_unit,'(A)') 'Error: do not mix ranges and lists in the same -N specification.'
             stop 1
         end if
 
@@ -168,7 +184,7 @@ module sod_ensemble_setup_mod
                 end if
                 read(token, *, iostat=ios) value
                 if (ios /= 0) then
-                    write(error_unit,'(A)') 'Error: valor invalido en la lista -N.'
+                    write(error_unit,'(A)') 'Error: invalid value in -N list.'
                     stop 1
                 end if
                 call append_value(temp, count, value)
@@ -181,19 +197,19 @@ module sod_ensemble_setup_mod
             has_list = .false.
             read(spec(1:colon_pos-1), *, iostat=ios) level_min
             if (ios /= 0) then
-                write(error_unit,'(A)') 'Error: limite inferior invalido en -N.'
+                write(error_unit,'(A)') 'Error: invalid lower bound in -N.'
                 stop 1
             end if
             read(spec(colon_pos+1:), *, iostat=ios) level_max
             if (ios /= 0) then
-                write(error_unit,'(A)') 'Error: limite superior invalido en -N.'
+                write(error_unit,'(A)') 'Error: invalid upper bound in -N.'
                 stop 1
             end if
         else
             has_list = .false.
             read(spec, *, iostat=ios) value
             if (ios /= 0) then
-                write(error_unit,'(A)') 'Error: especificacion -N invalida.'
+                write(error_unit,'(A)') 'Error: invalid -N specification.'
                 stop 1
             end if
             level_min = value
@@ -201,6 +217,7 @@ module sod_ensemble_setup_mod
         end if
     end subroutine parse_level_spec
 
+    !> Appends an integer to a dynamically sized list used during parsing.
     subroutine append_value(vec, count, value)
         integer, allocatable, intent(inout) :: vec(:)
         integer, intent(inout) :: count
@@ -220,6 +237,7 @@ module sod_ensemble_setup_mod
         call move_alloc(tmp, vec)
     end subroutine append_value
 
+    !> Creates the ordered list of substitution levels to process.
     subroutine build_level_sequence(level_min, level_max, level_list, has_list, total_sites, levels)
         integer, intent(in) :: level_min, level_max, total_sites
         integer, allocatable, intent(in) :: level_list(:)
@@ -275,6 +293,7 @@ module sod_ensemble_setup_mod
         end if
     end subroutine build_level_sequence
 
+    !> Processes a single level: enumerates unique subsets, writes artifacts, and runs external scripts.
     logical function process_level_setup(level, total_sites, eqmatrix, nop) result(success)
         integer, intent(in) :: level, total_sites, nop
         integer, intent(in) :: eqmatrix(:,:)
@@ -292,16 +311,16 @@ module sod_ensemble_setup_mod
         success = .false.
 
         total_comb = binomial_int64(total_sites, level)
-        write(*,'(A,I0)') 'Nivel: ', level
-        write(*,'(A,I0)') 'Combinaciones totales: ', total_comb
+        write(*,'(A,I0)') 'Level: ', level
+        write(*,'(A,I0)') 'Total combinations: ', total_comb
         call flush(output_unit)
 
         level_dir = format_level_directory(level)
         command = 'mkdir -p ' // trim(level_dir)
-        if (.not. run_shell_command(command, 'crear directorio ' // trim(level_dir))) return
+        if (.not. run_shell_command(command, 'create directory ' // trim(level_dir))) return
 
         command = 'bash -c "rm -f ' // trim(level_dir)//'/c*.vasp ' // trim(level_dir)//'/*.vasp.gin ' // trim(level_dir)//'/*.vasp.gout ' // trim(level_dir)//'/*.vasp.grs ' // trim(level_dir)//'/OUTSOD ' // trim(level_dir)//'/ENERGIES"'
-        if (.not. run_shell_command(command, 'limpiar carpeta ' // trim(level_dir))) return
+        if (.not. run_shell_command(command, 'clean directory ' // trim(level_dir))) return
 
         if (level == 0) then
             unique_count = 1
@@ -336,13 +355,13 @@ module sod_ensemble_setup_mod
         end if
 
         if (level > 0 .and. unique_count <= 0) then
-            write(error_unit,'(A)') 'Error: no se encontraron configuraciones unicas.'
+            write(error_unit,'(A)') 'Error: no unique configurations were found.'
             if (allocated(unique_subsets)) deallocate(unique_subsets)
             deallocate(unique_deg)
             return
         end if
 
-        write(*,'(A,I0)') 'Configuraciones unicas: ', max(1, unique_count)
+        write(*,'(A,I0)') 'Unique configurations: ', max(1, unique_count)
         call flush(output_unit)
 
         if (level > 0) then
@@ -385,21 +404,21 @@ module sod_ensemble_setup_mod
         end if
 
         command = 'bash -c "cd ' // trim(level_dir) // ' && ./run_jobs.sh"'
-        if (.not. run_shell_command(command, 'run_jobs.sh en '//trim(level_dir))) then
+        if (.not. run_shell_command(command, 'run_jobs.sh in '//trim(level_dir))) then
             if (allocated(unique_subsets)) deallocate(unique_subsets)
             deallocate(unique_deg)
             return
         end if
 
         command = 'bash -c "cd ' // trim(level_dir) // ' && ./extract.sh"'
-        if (.not. run_shell_command(command, 'extract.sh en '//trim(level_dir))) then
+        if (.not. run_shell_command(command, 'extract.sh in '//trim(level_dir))) then
             if (allocated(unique_subsets)) deallocate(unique_subsets)
             deallocate(unique_deg)
             return
         end if
 
         if (.not. energies_generated(level_dir)) then
-            write(error_unit,'(A)') 'Error: no se encontro el archivo ENERGIES despues de extract.sh.'
+            write(error_unit,'(A)') 'Error: the ENERGIES file was not found after extract.sh finished.'
             if (allocated(unique_subsets)) deallocate(unique_subsets)
             deallocate(unique_deg)
             return
@@ -411,6 +430,7 @@ module sod_ensemble_setup_mod
         success = .true.
     end function process_level_setup
 
+    !> Writes the OUTSOD file describing symmetry-unique configurations for a level.
     logical function write_outsod_file(dir, level, total_sites, unique_count, unique_deg, unique_subsets) result(ok)
         character(len=*), intent(in) :: dir
         integer, intent(in) :: level, total_sites, unique_count
@@ -440,6 +460,7 @@ module sod_ensemble_setup_mod
         ok = .true.
     end function write_outsod_file
 
+    !> Serializes a configuration into a POSCAR file inside the level directory.
     logical function write_poscar(dir, index, config, total_sites) result(ok)
         character(len=*), intent(in) :: dir
         integer, intent(in) :: index, total_sites
@@ -457,6 +478,7 @@ module sod_ensemble_setup_mod
         ok = .true.
     end function write_poscar
 
+    !> Copies helper shell scripts into the working level directory and ensures they are executable.
     logical function copy_support_scripts(dir) result(ok)
         character(len=*), intent(in) :: dir
         character(len=512) :: command
@@ -464,13 +486,13 @@ module sod_ensemble_setup_mod
         if (.not. scripts_ready) call verify_support_scripts()
 
         command = 'cp ' // trim(scripts_directory)//'/run_jobs.sh ' // trim(scripts_directory)//'/extract.sh ' // trim(scripts_directory)//'/vasp2gin.sh ' // trim(dir)
-        if (.not. run_shell_command(command, 'copiar scripts a '//trim(dir))) then
+        if (.not. run_shell_command(command, 'copy scripts to '//trim(dir))) then
             ok = .false.
             return
         end if
 
         command = 'chmod +x ' // trim(dir)//'/run_jobs.sh ' // trim(dir)//'/extract.sh ' // trim(dir)//'/vasp2gin.sh'
-        if (.not. run_shell_command(command, 'otorgar permisos en '//trim(dir))) then
+        if (.not. run_shell_command(command, 'grant permissions in '//trim(dir))) then
             ok = .false.
             return
         end if
@@ -478,6 +500,7 @@ module sod_ensemble_setup_mod
         ok = .true.
     end function copy_support_scripts
 
+    !> Executes a shell command and reports contextualized failures.
     logical function run_shell_command(command, context) result(ok)
         character(len=*), intent(in) :: command
         character(len=*), intent(in) :: context
@@ -485,18 +508,19 @@ module sod_ensemble_setup_mod
 
         call execute_command_line(trim(command), wait=.true., cmdstat=cmdstat, exitstat=exitstat)
         if (cmdstat /= 0) then
-            write(error_unit,'(A,": fallo al lanzar comando (cmdstat=",I0,")")') trim(context), cmdstat
+            write(error_unit,'(A,": failed to launch command (cmdstat=",I0,")")') trim(context), cmdstat
             ok = .false.
             return
         end if
         if (exitstat /= 0) then
-            write(error_unit,'(A,": el comando devolvio codigo ",I0)') trim(context), exitstat
+            write(error_unit,'(A,": the command returned exit code ",I0)') trim(context), exitstat
             ok = .false.
             return
         end if
         ok = .true.
     end function run_shell_command
 
+    !> Grows arrays that track unique subsets when capacity thresholds are exceeded.
     subroutine ensure_unique_capacity(level, subsets, deg, capacity, required)
         integer, intent(in) :: level, required
         integer, intent(inout) :: capacity
@@ -524,6 +548,7 @@ module sod_ensemble_setup_mod
         capacity = new_capacity
     end subroutine ensure_unique_capacity
 
+    !> Checks whether extract.sh produced the ENERGIES file in the level directory.
     logical function energies_generated(dir) result(ok)
         character(len=*), intent(in) :: dir
         logical :: exists
@@ -531,6 +556,7 @@ module sod_ensemble_setup_mod
         ok = exists
     end function energies_generated
 
+    !> Locates the scripts directory and caches it for later copy operations.
     subroutine verify_support_scripts()
         logical :: ok
 
@@ -538,13 +564,14 @@ module sod_ensemble_setup_mod
 
         ok = locate_scripts_directory(scripts_directory)
         if (.not. ok) then
-            write(error_unit,'(A)') 'Error: no se encontro el directorio scripts con run_jobs.sh, extract.sh y vasp2gin.sh.'
+            write(error_unit,'(A)') 'Error: scripts directory with run_jobs.sh, extract.sh, and vasp2gin.sh was not found.'
             stop 1
         end if
 
         scripts_ready = .true.
     end subroutine verify_support_scripts
 
+    !> Searches parent directories for the scripts folder containing required helpers.
     logical function locate_scripts_directory(out_dir) result(found)
         character(len=*), intent(out) :: out_dir
         integer :: depth, step
@@ -578,12 +605,14 @@ module sod_ensemble_setup_mod
         end do
     end function locate_scripts_directory
 
+    !> Formats the directory name used for a given substitution level (e.g., n03).
     pure function format_level_directory(level) result(dir)
         integer, intent(in) :: level
         character(len=16) :: dir
         write(dir,'("n0",I0)') level
     end function format_level_directory
 
+    !> Converts a string to lowercase in place (ASCII only).
     subroutine to_lower_inplace(str)
         character(len=*), intent(inout) :: str
         integer :: i, code

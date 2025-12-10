@@ -1,3 +1,16 @@
+!*******************************************************************************
+!    Copyright (c) 2025, Salvador R.G. Balestra
+!
+!    This file is part of the SOD package.
+!
+!    SOD is free software: you can redistribute it and/or modify
+!    it under the terms of the GNU General Public License as published by
+!    the Free Software Foundation, either version 3 of the License, or
+!    (at your option) any later version.
+!
+!******************************************************************************
+
+!> Entry point for the unified SOD ensemble executable; selects MC, exact, or setup modes.
 program sod_ensemble
     use sod_ensemble_mc_mod, only: run_sod_ensemble_mc
     use sod_ensemble_exact_mod, only: run_sod_ensemble_exact
@@ -28,13 +41,13 @@ program sod_ensemble
 
     call classify_first_argument(first_arg, argc, mode_selected, mode_token, offset)
     if (.not. mode_selected) then
-        write(error_unit,'(A)') 'Error: se debe indicar el modo "mc", "exact" o "setup" como primer argumento o mediante --mode.'
+        write(error_unit,'(A)') 'Error: you must specify the mode "mc", "exact", or "setup" as the first argument or via --mode.'
         call print_combined_usage()
         stop 1
     end if
 
     if (.not. normalize_mode(mode_token)) then
-        write(error_unit,'(A)') 'Error: modo desconocido "'//trim(mode_token)//'". Use "mc", "exact" o "setup".'
+        write(error_unit,'(A)') 'Error: unknown mode "'//trim(mode_token)//'". Use "mc", "exact", or "setup".'
         call print_combined_usage()
         stop 1
     end if
@@ -47,12 +60,13 @@ program sod_ensemble
     case ('setup')
         call run_sod_ensemble_setup(arg_offset=offset)
     case default
-        write(error_unit,'(A)') 'Error interno: modo no reconocido tras normalización.'
+        write(error_unit,'(A)') 'Internal error: mode not recognized after normalization.'
         stop 1
     end select
 
 contains
 
+    !> Classifies the first CLI argument, extracting the desired execution mode and argument offset.
     subroutine classify_first_argument(raw_arg, argc, mode_selected, mode_token, offset)
         character(len=*), intent(in) :: raw_arg
         integer, intent(in) :: argc
@@ -85,7 +99,7 @@ contains
             offset = 1
         case ('--mode')
             if (argc < 2) then
-                write(error_unit,'(A)') 'Error: se esperaba un valor después de --mode.'
+                write(error_unit,'(A)') 'Error: expected a value after --mode.'
                 call print_combined_usage()
                 stop 1
             end if
@@ -93,7 +107,7 @@ contains
             mode_token = adjustl(mode_token)
             call to_lower_inplace(mode_token)
             if (len_trim(mode_token) == 0) then
-                write(error_unit,'(A)') 'Error: se esperaba un valor después de --mode.'
+                write(error_unit,'(A)') 'Error: expected a value after --mode.'
                 call print_combined_usage()
                 stop 1
             end if
@@ -103,7 +117,7 @@ contains
             if (index(lowered_trim, '--mode=') == 1) then
                 eq_pos = index(raw_arg, '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(raw_arg)) then
-                    write(error_unit,'(A)') 'Error: se esperaba un valor después de --mode=.'
+                    write(error_unit,'(A)') 'Error: expected a value after --mode=.'
                     call print_combined_usage()
                     stop 1
                 end if
@@ -111,7 +125,7 @@ contains
                 mode_token = adjustl(mode_token)
                 call to_lower_inplace(mode_token)
                 if (len_trim(mode_token) == 0) then
-                    write(error_unit,'(A)') 'Error: se esperaba un valor después de --mode=.'
+                    write(error_unit,'(A)') 'Error: expected a value after --mode=.'
                     call print_combined_usage()
                     stop 1
                 end if
@@ -126,6 +140,7 @@ contains
         end select
     end subroutine classify_first_argument
 
+    !> Normalizes a mode token to one of the canonical identifiers.
     logical function normalize_mode(token)
         character(len=*), intent(inout) :: token
         character(len=256) :: lowered
@@ -150,6 +165,7 @@ contains
         end select
     end function normalize_mode
 
+    !> Converts an in-place string to lowercase ASCII.
     subroutine to_lower_inplace(str)
         character(len=*), intent(inout) :: str
         integer :: i, code
@@ -162,6 +178,7 @@ contains
         end do
     end subroutine to_lower_inplace
 
+    !> Returns true when the provided token requests help output.
     logical function is_help_token(raw)
         character(len=*), intent(in) :: raw
         character(len=len(raw)) :: token
@@ -188,23 +205,24 @@ contains
         end select
     end function is_help_token
 
+    !> Prints usage instructions combining the MC, exact, and setup modes.
     subroutine print_combined_usage()
-        write(*,'(A)') 'Uso: sod_ensemble <mc|exact|setup> [argumentos del modo]'
-        write(*,'(A)') '     sod_ensemble --mode <mc|exact|setup> [argumentos del modo]'
-        write(*,'(A)') '     sod_ensemble --mode=<mc|exact|setup> [argumentos del modo]'
+        write(*,'(A)') 'Usage: sod_ensemble <mc|exact|setup> [mode arguments]'
+        write(*,'(A)') '       sod_ensemble --mode <mc|exact|setup> [mode arguments]'
+        write(*,'(A)') '       sod_ensemble --mode=<mc|exact|setup> [mode arguments]'
         write(*,'(A)') '     sod_ensemble --help'
         write(*,'(A)') ''
-        write(*,'(A)') '  mc    -> ejecuta el muestreo Monte Carlo (equivalente a sod_ensemble_mc).'
-        write(*,'(A)') '  exact -> ejecuta la enumeración exhaustiva (equivalente a sod_ensemble_exact).'
-        write(*,'(A)') '  setup -> prepara carpetas n0X con configuraciones únicas y lanza el flujo de GULP.'
+        write(*,'(A)') '  mc    -> runs the Monte Carlo sampling workflow (same as sod_ensemble_mc).'
+        write(*,'(A)') '  exact -> performs exhaustive enumeration (same as sod_ensemble_exact).'
+        write(*,'(A)') '  setup -> prepares n0X folders with unique configurations and triggers the GULP pipeline.'
         write(*,'(A)') ''
-        write(*,'(A)') 'Ejemplos:'
+        write(*,'(A)') 'Examples:'
         write(*,'(A)') '  sod_ensemble mc -T 800 -M 6 -C 2000 -s 1234 -a metropolis --omp'
         write(*,'(A)') '  sod_ensemble exact -N 5:10 -t 1e-5'
         write(*,'(A)') '  sod_ensemble setup -N 3,6,9'
         write(*,'(A)') ''
-        write(*,'(A)') 'Los ejecutables tradicionales sod_ensemble_mc y sod_ensemble_exact siguen disponibles como'
-        write(*,'(A)') 'envoltorios que delegan en este binario unificado.'
+        write(*,'(A)') 'Legacy executables sod_ensemble_mc and sod_ensemble_exact remain available as wrappers'
+        write(*,'(A)') 'that forward to this unified binary.'
     end subroutine print_combined_usage
 
 end program sod_ensemble

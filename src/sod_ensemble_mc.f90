@@ -29,6 +29,7 @@ module sod_ensemble_mc_mod
     character(len=512), save :: summary_txt_filename = ''
 
     contains
+    !> Drives Monte Carlo mode: parses options, initializes state, and iterates levels.
     subroutine run_sod_ensemble_mc(arg_offset)
         integer, intent(in), optional :: arg_offset
         integer :: max_exact_combos
@@ -82,7 +83,7 @@ module sod_ensemble_mc_mod
         call symmetry_initialize()
         call symmetry_get_matrix(eqmatrix, nop, total_sites)
         if (.not. associated(eqmatrix) .or. nop <= 0 .or. total_sites <= 0) then
-            write(*,'(A)') 'Error: no se pudo obtener EQMATRIX o el número de posiciones/operadores es inválido.'
+            write(*,'(A)') 'Error: unable to obtain EQMATRIX or the number of positions/operators is invalid.'
             stop 1
         end if
         nullify(eqmatrix)
@@ -94,7 +95,7 @@ module sod_ensemble_mc_mod
         if (allow_parallel_levels .and. .not. force_parallel_lists) then
             allow_parallel_levels = .false.
             if (use_parallel) then
-                write(*,'(A)') 'Aviso: se desactiva el paralelismo externo por hilo; se mantiene el paralelismo interno por nivel.'
+                write(*,'(A)') 'Warning: disabling outer per-level parallelism; inner parallelism per level remains active.'
             end if
         end if
 
@@ -107,18 +108,18 @@ module sod_ensemble_mc_mod
         if (has_level_overrides) then
             call finalize_level_overrides(level_overrides, level_targets, total_sites)
             if (.not. allocated(level_targets)) then
-                write(*,'(A)') 'Error: la lista de niveles especificada en -N no contiene valores válidos.'
+                write(*,'(A)') 'Error: the level list provided via -N contains no valid values.'
                 stop 1
             end if
             if (allow_parallel_levels .and. .not. force_parallel_lists) then
-                write(*,'(A)') 'Aviso: se desactiva el paralelismo externo para respetar el orden de -N.'
+                write(*,'(A)') 'Warning: disabling outer parallelism to preserve the order specified by -N.'
                 allow_parallel_levels = .false.
                 if (effective_use_parallel) then
-                    write(*,'(A)') 'Aviso: el muestreo por nivel se ejecutará en modo secuencial para mayor estabilidad.'
+                    write(*,'(A)') 'Warning: per-level sampling will execute sequentially for stability.'
                     effective_use_parallel = .false.
                 end if
             else if (force_parallel_lists .and. allow_parallel_levels) then
-                write(*,'(A)') 'Aviso: se mantiene el paralelismo con lista explícita (--parallel-lists); los resultados pueden llegar fuera de orden.'
+                write(*,'(A)') 'Warning: retaining parallel execution with explicit list (--parallel-lists); results may appear out of order.'
             end if
         else
             if (level_max < 0) then
@@ -132,25 +133,33 @@ module sod_ensemble_mc_mod
             if (level_start > level_end) level_start = level_end
         end if
 
-        write(*,'(A)') '--- Parámetros del cálculo ---'
-        write(*,'(A,F10.2)') 'Temperatura (K): ', temperature
-        write(*,'(A,I6)') 'Sitios sustituibles (npos): ', total_sites
-        write(*,'(A,I6)') 'Max sustituciones evaluadas: ', effective_max
+        write(*,'(A)') '--- Calculation parameters ---'
+        write(*,'(A,F10.2)') 'Temperature (K): ', temperature
+        write(*,'(A,I6)') 'Substitutable sites (npos): ', total_sites
+        write(*,'(A,I6)') 'Max evaluated substitutions: ', effective_max
         if (has_level_overrides) then
             call print_level_overrides(level_targets)
         else
-            write(*,'(A,I0,A,I0)') 'Niveles evaluados: ', level_start, ' .. ', level_end
+            write(*,'(A,I0,A,I0)') 'Levels evaluated: ', level_start, ' .. ', level_end
         end if
-        write(*,'(A,I8)') 'Umbral enumeración exacta: ', max_exact_combos
-        write(*,'(A,I8)') 'Muestras aleatorias (si se supera el umbral): ', samples_per_level
-        write(*,'(A)') 'Resultados por nivel guardados en: '//trim(summary_filename)
-        write(*,'(A)') '                               y: '//trim(summary_txt_filename)
-        write(*,'(A)') 'Método de muestreo MC (si aplica): '//trim(sampling_mode)
-        write(*,'(A)') 'OpenMP paralelo: '//merge('Si','No',effective_use_parallel)
-        write(*,'(A)') 'Forzar muestreo MC: '//merge('Si','No',force_mc_sampling)
+        write(*,'(A,I8)') 'Exact enumeration threshold: ', max_exact_combos
+        write(*,'(A,I8)') 'Random samples (if threshold exceeded): ', samples_per_level
+        write(*,'(A)') 'Per-level results stored in: '//trim(summary_filename)
+        write(*,'(A)') '                          and: '//trim(summary_txt_filename)
+        write(*,'(A)') 'MC sampling method (if applicable): '//trim(sampling_mode)
+        if (effective_use_parallel) then
+            write(*,'(A)') 'OpenMP parallel: Yes'
+        else
+            write(*,'(A)') 'OpenMP parallel: No'
+        end if
+        if (force_mc_sampling) then
+            write(*,'(A)') 'Force MC sampling: Yes'
+        else
+            write(*,'(A)') 'Force MC sampling: No'
+        end if
         if (use_parallel) then
-            write(*,'(A)') 'Nota: las salidas por nivel pueden imprimirse en orden no secuencial durante el cálculo paralelo.'
-            write(*,'(A)') '      Los archivos de resumen se reordenan al finalizar para dejar los niveles crecientes.'
+            write(*,'(A)') 'Note: per-level outputs may print non-sequentially during parallel execution.'
+            write(*,'(A)') '      Summary files are reordered at the end to restore ascending levels.'
         end if
         write(*,*)
 
@@ -201,7 +210,7 @@ module sod_ensemble_mc_mod
         call cleanup_energy_calc()
     end subroutine run_sod_ensemble_mc
 
-    ! Parses optional command-line arguments and populates runtime parameters.
+    !> Parses command-line arguments for Monte Carlo mode and populates runtime parameters.
     subroutine parse_arguments(temp, level_min, level_max, max_subs, samples_level, seed, sampler, use_parallel, omp_available, force_mc, level_list, has_level_list, force_parallel_lists, osda_gin_option, arg_offset)
         real(dp), intent(out) :: temp
         integer, intent(out) :: level_min, level_max, max_subs, samples_level, seed
@@ -282,7 +291,7 @@ module sod_ensemble_mc_mod
             else if (index(trim(lowered), '--osda-gin=') == 1) then
                 eq_pos = index(args(i), '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
-                    write(error_unit,'(A)') 'Error: argumento inválido para --osda-gin.'
+                    write(error_unit,'(A)') 'Error: invalid argument for --osda-gin.'
                     call print_usage(omp_available)
                     stop 1
                 end if
@@ -291,7 +300,7 @@ module sod_ensemble_mc_mod
                 skip(i) = .true.
             else if (trim(lowered) == '--osda-gin' .or. trim(lowered) == '--osda_gin') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta ruta después de --osda-gin.'
+                    write(error_unit,'(A)') 'Error: missing path after --osda-gin.'
                     call print_usage(omp_available)
                     stop 1
                 end if
@@ -306,87 +315,87 @@ module sod_ensemble_mc_mod
                 skip(i) = .true.
             else if (trim(lowered) == '-t' .or. trim(lowered) == '--temperature') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta valor después de --temperature.'
+                    write(error_unit,'(A)') 'Error: missing value after --temperature.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_real_option(args(i+1), temp, 'temperatura (--temperature/-T)')
+                call parse_real_option(args(i+1), temp, 'temperature (--temperature/-T)')
                 temp_set = .true.
                 skip(i) = .true.
                 skip(i+1) = .true.
             else if (index(trim(lowered), '--temperature=') == 1) then
                 eq_pos = index(args(i), '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
-                    write(error_unit,'(A)') 'Error: argumento inválido para --temperature.'
+                    write(error_unit,'(A)') 'Error: invalid argument for --temperature.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_real_option(adjustl(args(i)(eq_pos+1:)), temp, 'temperatura (--temperature/-T)')
+                call parse_real_option(adjustl(args(i)(eq_pos+1:)), temp, 'temperature (--temperature/-T)')
                 temp_set = .true.
                 skip(i) = .true.
             else if (trim(lowered) == '-m' .or. trim(lowered) == '--max-substitutions') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta valor después de --max-substitutions.'
+                    write(error_unit,'(A)') 'Error: missing value after --max-substitutions.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_int_option(args(i+1), max_subs, 'máximo de sustituciones (--max-substitutions/-M)')
+                call parse_int_option(args(i+1), max_subs, 'maximum substitutions (--max-substitutions/-M)')
                 max_subs_set = .true.
                 skip(i) = .true.
                 skip(i+1) = .true.
             else if (index(trim(lowered), '--max-substitutions=') == 1 .or. index(trim(lowered), '--max_substitutions=') == 1) then
                 eq_pos = index(args(i), '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
-                    write(error_unit,'(A)') 'Error: argumento inválido para --max-substitutions.'
+                    write(error_unit,'(A)') 'Error: invalid argument for --max-substitutions.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_int_option(adjustl(args(i)(eq_pos+1:)), max_subs, 'máximo de sustituciones (--max-substitutions/-M)')
+                call parse_int_option(adjustl(args(i)(eq_pos+1:)), max_subs, 'maximum substitutions (--max-substitutions/-M)')
                 max_subs_set = .true.
                 skip(i) = .true.
             else if (trim(lowered) == '-s' .or. trim(lowered) == '--seed') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta valor después de --seed.'
+                    write(error_unit,'(A)') 'Error: missing value after --seed.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_int_option(args(i+1), seed, 'semilla (--seed/-s)')
+                call parse_int_option(args(i+1), seed, 'seed (--seed/-s)')
                 seed_set = .true.
                 skip(i) = .true.
                 skip(i+1) = .true.
             else if (index(trim(lowered), '--seed=') == 1) then
                 eq_pos = index(args(i), '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
-                    write(error_unit,'(A)') 'Error: argumento inválido para --seed.'
+                    write(error_unit,'(A)') 'Error: invalid argument for --seed.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_int_option(adjustl(args(i)(eq_pos+1:)), seed, 'semilla (--seed/-s)')
+                call parse_int_option(adjustl(args(i)(eq_pos+1:)), seed, 'seed (--seed/-s)')
                 seed_set = .true.
                 skip(i) = .true.
             else if (trim(lowered) == '-c' .or. trim(lowered) == '--samples') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta valor después de --samples.'
+                    write(error_unit,'(A)') 'Error: missing value after --samples.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_positive_int_option(args(i+1), samples_level, 'muestras por nivel (--samples/-S)')
+                call parse_positive_int_option(args(i+1), samples_level, 'samples per level (--samples/-S)')
                 samples_set = .true.
                 skip(i) = .true.
                 skip(i+1) = .true.
             else if (index(trim(lowered), '--samples=') == 1) then
                 eq_pos = index(args(i), '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
-                    write(error_unit,'(A)') 'Error: argumento inválido para --samples.'
+                    write(error_unit,'(A)') 'Error: invalid argument for --samples.'
                     call print_usage(omp_available)
                     stop 1
                 end if
-                call parse_positive_int_option(adjustl(args(i)(eq_pos+1:)), samples_level, 'muestras por nivel (--samples/-S)')
+                call parse_positive_int_option(adjustl(args(i)(eq_pos+1:)), samples_level, 'samples per level (--samples/-S)')
                 samples_set = .true.
                 skip(i) = .true.
             else if (trim(lowered) == '-a' .or. trim(lowered) == '--sampler') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta valor después de --sampler.'
+                    write(error_unit,'(A)') 'Error: missing value after --sampler.'
                     call print_usage(omp_available)
                     stop 1
                 end if
@@ -397,7 +406,7 @@ module sod_ensemble_mc_mod
             else if (index(trim(lowered), '--sampler=') == 1) then
                 eq_pos = index(args(i), '=')
                 if (eq_pos <= 0 .or. eq_pos == len_trim(args(i))) then
-                    write(error_unit,'(A)') 'Error: argumento inválido para --sampler.'
+                    write(error_unit,'(A)') 'Error: invalid argument for --sampler.'
                     call print_usage(omp_available)
                     stop 1
                 end if
@@ -424,7 +433,7 @@ module sod_ensemble_mc_mod
             end do
             if (trim(lowered) == '-n') then
                 if (i == argc) then
-                    write(error_unit,'(A)') 'Error: falta especificación después de -N.'
+                    write(error_unit,'(A)') 'Error: missing specification after -N.'
                     call print_usage(omp_available)
                     stop 1
                 end if
@@ -434,7 +443,7 @@ module sod_ensemble_mc_mod
                 if (index(spec_trim, ',') > 0) then
                     call parse_level_list(spec_trim, level_list, list_status)
                     if (list_status /= 0) then
-                        write(error_unit,'(A)') 'Error: especificación de lista inválida en -N.'
+                        write(error_unit,'(A)') 'Error: invalid list specification in -N.'
                         call print_usage(omp_available)
                         stop 1
                     end if
@@ -444,20 +453,20 @@ module sod_ensemble_mc_mod
                 else if (colon_pos > 0) then
                     read(spec_trim(1:colon_pos-1),*,iostat=ios) level_min
                     if (ios /= 0) then
-                        write(error_unit,'(A)') 'Error: límite inferior inválido en -N.'
+                        write(error_unit,'(A)') 'Error: invalid lower bound in -N.'
                         call print_usage(omp_available)
                         stop 1
                     end if
                     read(spec_trim(colon_pos+1:),*,iostat=ios) level_max
                     if (ios /= 0) then
-                        write(error_unit,'(A)') 'Error: límite superior inválido en -N.'
+                        write(error_unit,'(A)') 'Error: invalid upper bound in -N.'
                         call print_usage(omp_available)
                         stop 1
                     end if
                 else
                     read(spec_trim,*,iostat=ios) level_min
                     if (ios /= 0) then
-                        write(error_unit,'(A)') 'Error: especificación de nivel inválida en -N.'
+                        write(error_unit,'(A)') 'Error: invalid level specification in -N.'
                         call print_usage(omp_available)
                         stop 1
                     end if
@@ -521,7 +530,7 @@ module sod_ensemble_mc_mod
                 read(carg,*,iostat=ios) samples_level
                 if (ios == 0) then
                     if (samples_level <= 0) then
-                        write(error_unit,'(A)') 'Advertencia: Nsamples debe ser positivo, se usan 5000 muestras'
+                        write(error_unit,'(A)') 'Warning: Nsamples must be positive; using 5000 samples instead.'
                         samples_level = 5000
                     end if
                     samples_set = .true.
@@ -538,7 +547,7 @@ module sod_ensemble_mc_mod
             end if
             
             if (.not. handled) then
-                write(error_unit,'(A)') 'Advertencia: argumento ignorado -> '//trim(carg)
+                write(error_unit,'(A)') 'Warning: ignored argument -> '//trim(carg)
             end if
         end do
         
@@ -551,6 +560,7 @@ module sod_ensemble_mc_mod
         return
     end subroutine parse_arguments
 
+    !> Parses a floating-point option value and raises an error when invalid.
     subroutine parse_real_option(raw_value, target, label)
         character(len=*), intent(in) :: raw_value
         real(dp), intent(out) :: target
@@ -561,11 +571,12 @@ module sod_ensemble_mc_mod
         text = adjustl(raw_value)
         read(text, *, iostat=ios) target
         if (ios /= 0) then
-            write(error_unit,'(A)') 'Error: valor inválido para '//trim(label)//'.'
+            write(error_unit,'(A)') 'Error: invalid value for '//trim(label)//'.'
             stop 1
         end if
     end subroutine parse_real_option
 
+    !> Parses an integer option value.
     subroutine parse_int_option(raw_value, target, label)
         character(len=*), intent(in) :: raw_value
         integer, intent(out) :: target
@@ -576,11 +587,12 @@ module sod_ensemble_mc_mod
         text = adjustl(raw_value)
         read(text, *, iostat=ios) target
         if (ios /= 0) then
-            write(error_unit,'(A)') 'Error: valor inválido para '//trim(label)//'.'
+            write(error_unit,'(A)') 'Error: invalid value for '//trim(label)//'.'
             stop 1
         end if
     end subroutine parse_int_option
 
+    !> Parses a strictly positive integer option value.
     subroutine parse_positive_int_option(raw_value, target, label)
         character(len=*), intent(in) :: raw_value
         integer, intent(out) :: target
@@ -591,11 +603,12 @@ module sod_ensemble_mc_mod
         text = adjustl(raw_value)
         read(text, *, iostat=ios) target
         if (ios /= 0 .or. target <= 0) then
-            write(error_unit,'(A)') 'Error: valor inválido para '//trim(label)//'.'
+            write(error_unit,'(A)') 'Error: invalid value for '//trim(label)//'.'
             stop 1
         end if
     end subroutine parse_positive_int_option
 
+    !> Normalizes the sampler argument to a supported keyword.
     subroutine parse_sampler_option(raw_value, sampler)
         character(len=*), intent(in) :: raw_value
         character(len=*), intent(inout) :: sampler
@@ -611,11 +624,12 @@ module sod_ensemble_mc_mod
         case ('uniform', 'metropolis')
             sampler = lowered
         case default
-            write(error_unit,'(A)') 'Error: sampler inválido. Use "uniform" o "metropolis".'
+            write(error_unit,'(A)') 'Error: invalid sampler. Use "uniform" or "metropolis".'
             stop 1
         end select
     end subroutine parse_sampler_option
 
+    !> Parses a comma-separated level list and returns status 0 on success.
     subroutine parse_level_list(spec_in, out_levels, status)
         character(len=*), intent(in) :: spec_in
         integer, allocatable, intent(out) :: out_levels(:)
@@ -666,7 +680,7 @@ module sod_ensemble_mc_mod
         end do
     end subroutine parse_level_list
 
-! Interprets an OpenMP flag token and updates the parallel execution mode.
+    !> Interprets an OpenMP flag token and updates the parallel execution mode.
 subroutine parse_omp_flag(raw, use_parallel, omp_available)
     character(len=*), intent(in) :: raw
     logical, intent(inout) :: use_parallel
@@ -685,16 +699,17 @@ subroutine parse_omp_flag(raw, use_parallel, omp_available)
         if (omp_available) then
             use_parallel = .true.
         else
-            write(error_unit,'(A)') 'Advertencia: OpenMP no disponible en esta compilación, se ignora argumento.'
+            write(error_unit,'(A)') 'Warning: OpenMP not available in this build; ignoring argument.'
             use_parallel = .false.
         end if
     case ('noomp', 'no', '0', 'false')
         use_parallel = .false.
     case default
-        write(error_unit,'(A)') 'Advertencia: argumento desconocido para modo paralelo; se mantiene configuración previa.'
+        write(error_unit,'(A)') 'Warning: unknown argument for parallel mode; keeping previous configuration.'
     end select
 end subroutine parse_omp_flag
 
+    !> Filters and deduplicates explicit level overrides provided via -N lists.
     subroutine finalize_level_overrides(raw_levels, targets, total_sites)
         integer, allocatable, intent(inout) :: raw_levels(:)
         integer, allocatable, intent(out) :: targets(:)
@@ -711,7 +726,7 @@ end subroutine parse_omp_flag
         do idx = 1, size(raw_levels)
             val = raw_levels(idx)
             if (val < 0 .or. val > total_sites) then
-                write(*,'(A,I0,A)') 'Aviso: nivel ', val, ' fuera de rango; se omite.'
+                write(*,'(A,I0,A)') 'Warning: level ', val, ' is out of range; skipping.'
                 call flush(output_unit)
                 cycle
             end if
@@ -731,11 +746,12 @@ end subroutine parse_omp_flag
         deallocate(raw_levels)
     end subroutine finalize_level_overrides
 
+    !> Prints the explicit level list selected via -N.
     subroutine print_level_overrides(levels)
         integer, intent(in) :: levels(:)
         integer :: idx
-        write(*,'(A)') 'Niveles evaluados: lista específica'
-        write(*,'(A)', advance='no') 'Valores: '
+        write(*,'(A)') 'Levels evaluated: explicit list'
+        write(*,'(A)', advance='no') 'Values: '
         do idx = 1, size(levels)
             if (idx > 1) write(*,'(A)', advance='no') ', '
             write(*,'(I0)', advance='no') levels(idx)
@@ -743,7 +759,7 @@ end subroutine parse_omp_flag
         write(*,*)
     end subroutine print_level_overrides
 
-! Emits program usage information including optional OpenMP note.
+!> Emits program usage information including optional OpenMP note.
 subroutine print_usage(omp_available)
     logical, intent(in) :: omp_available
     
@@ -755,40 +771,39 @@ subroutine print_usage(omp_available)
     shrink_percent = uniform_cap_shrink * 100.0_dp
     write(shrink_str,'(F5.1)') shrink_percent
     
-    write(*,'(A)') 'Uso: sod_ensemble_mc [-T <K>] [-M <Nmax>] [-C <Nsamples>] [-s <seed>] [-a <sampler>] [--omp|--no-omp] [--force-mc] [-N rango]'
+    write(*,'(A)') 'Usage: sod_ensemble_mc [-T <K>] [-M <Nmax>] [-C <Nsamples>] [-s <seed>] [-a <sampler>] [--omp|--no-omp] [--force-mc] [-N range]'
     write(*,'(A)') '       sod_ensemble_mc --help'
     write(*,'(A)') ''
-    write(*,'(A)') 'Argumentos opcionales (por defecto entre corchetes; la sintaxis posicional clásica se mantiene para compatibilidad):'
-    write(*,'(A)') '  -T, --temperature <K>     Temperatura en Kelvin para los pesos de Boltzmann [1000].'
-    write(*,'(A)') '  -M, --max-substitutions N Número máximo de sustituciones evaluadas sin -N [-1 -> todos].'
-    write(*,'(A)') '  -C, --samples N           Muestras MC por nivel cuando C(N,npos) supera el umbral [5000].'
-    write(*,'(A)') '  -s, --seed valor          Semilla del generador aleatorio [-1 -> semilla desde system_clock].'
-    write(*,'(A)') '  -a, --sampler modo        "uniform" o "metropolis" [uniform].'
-    write(*,'(A)') '      --omp / --no-omp       Activa o desactiva OpenMP explícitamente.'
-    write(*,'(A)') '  -N espec                  Rango o lista: -N 5 (solo 5), -N 3:8 (3 a 8), -N 12,30,45 (lista puntual).'
-    write(*,'(A)') '  --parallel-lists          Mantiene OpenMP incluso con listas de -N (puede alterar el orden).'
-    write(*,'(A)') '  --force-mc                Fuerza muestreo Monte Carlo incluso si C(N,npos) <= umbral exacto.'
-    write(*,'(A)') '  --osda-gin <fichero>      Añade el fragmento OSDA indicado al generar .gin.'
-    write(*,'(A)') '                             Usa "default" para copiar scripts/OSDA_ITW.gin.'
-    write(*,'(A)') '  --no-osda-gin             Evita añadir fragmentos OSDA a los .gin creados (por defecto).'
+    write(*,'(A)') 'Optional arguments (defaults in brackets; legacy positional syntax remains available):'
+    write(*,'(A)') '  -T, --temperature <K>     Temperature in Kelvin for Boltzmann weights [1000].'
+    write(*,'(A)') '  -M, --max-substitutions N Maximum substitutions evaluated when -N is absent [-1 -> all].'
+    write(*,'(A)') '  -C, --samples N           MC samples per level when C(N,npos) exceeds the threshold [5000].'
+    write(*,'(A)') '  -s, --seed value          Random-number seed [-1 -> derived from system_clock].'
+    write(*,'(A)') '  -a, --sampler mode        "uniform" or "metropolis" [uniform].'
+    write(*,'(A)') '      --omp / --no-omp      Explicitly enable or disable OpenMP.'
+    write(*,'(A)') '  -N spec                   Range or list: -N 5 (only 5), -N 3:8 (3 to 8), -N 12,30,45 (explicit list).'
+    write(*,'(A)') '  --parallel-lists          Keep OpenMP enabled even with -N lists (results may appear out of order).'
+    write(*,'(A)') '  --force-mc                Force Monte Carlo sampling even if C(N,npos) <= exact threshold.'
+    write(*,'(A)') '  --osda-gin <file>         Append the specified OSDA fragment when generating .gin files.'
+    write(*,'(A)') '                             Use "default" to copy scripts/OSDA_ITW.gin.'
+    write(*,'(A)') '  --no-osda-gin             Skip OSDA fragments when creating .gin files (default).'
     write(*,'(A)') ''
-    write(*,'(A)') 'Otros detalles:'
-    write(*,'(A)') '  - Por defecto se evalúan todos los niveles desde N=0 hasta Nmax salvo que -N limite el conjunto.'
-    write(*,'(A)') '  - Si C(N,npos) <= 200000 se enumeran todas las configuraciones; en caso contrario se muestrea MC.'
-    write(*,'(A)') '  - El muestreo uniforme aplica control adaptativo del cupo de configuraciones únicas ' // &
-    '(mínimo '//trim(cap_str)//', factor '//trim(adjustl(shrink_str))//'%).'
-    write(*,'(A)') '  - Los resultados agregados de cada nivel se guardan en '//trim(summary_filename)//'.'
-    write(*,'(A)') '  - El resumen en texto plano se escribe en '//trim(summary_txt_filename)//'.'
+    write(*,'(A)') 'Additional details:'
+    write(*,'(A)') '  - By default every level from N=0 up to Nmax is evaluated unless -N restricts the set.'
+    write(*,'(A)') '  - If C(N,npos) <= 200000 all configurations are enumerated; otherwise Monte Carlo sampling is used.'
+    write(*,'(A)') '  - Uniform sampling applies adaptive control to the unique configuration target ' // &
+    '(minimum '//trim(cap_str)//', factor '//trim(adjustl(shrink_str))//'%).'
+    write(*,'(A)') '  - Aggregated results for each level are written to '//trim(summary_filename)//'.'
+    write(*,'(A)') '  - The plain-text summary is written to '//trim(summary_txt_filename)//'.'
     write(*,'(A)') ''
-    write(*,'(A)') 'Ejemplos:'
-    write(*,'(A)') '  sod_ensemble_mc                     # Ejecuta con valores por defecto.'
+    write(*,'(A)') 'Examples:'
+    write(*,'(A)') '  sod_ensemble_mc                     # Run with defaults.'
     write(*,'(A)') '  sod_ensemble_mc 800 6 2000 1234 metropolis omp'
-    write(*,'(A)') '                                        # 800 K, hasta 6 sustituciones,'// &
-    ' Metropolis y OpenMP.'
-    write(*,'(A)') '  sod_ensemble_mc -N 12,30,45         # Evalúa solo los niveles 12, 30 y 45.'
+    write(*,'(A)') '                                        # 800 K, up to 6 substitutions, Metropolis and OpenMP.'
+    write(*,'(A)') '  sod_ensemble_mc -N 12,30,45         # Evaluate only levels 12, 30, and 45.'
 end subroutine print_usage
 
-! Checks whether a token corresponds to any supported help flag.
+!> Checks whether a token corresponds to any supported help flag.
 logical function is_help_argument(arg)
 character(len=*), intent(in) :: arg
 character(len=len(arg)) :: token
@@ -814,7 +829,7 @@ is_help_argument = .false.
 end if
 end function is_help_argument
 
-! Initializes the intrinsic random generator with a deterministic or clock seed.
+!> Initializes the intrinsic random generator with a deterministic or clock-based seed.
 subroutine configure_random_seed(seed)
     integer, intent(in) :: seed
     integer :: n, i
@@ -839,7 +854,7 @@ subroutine configure_random_seed(seed)
     deallocate(seed_array)
 end subroutine configure_random_seed
 
-! Reads the restart environment toggle and reports whether restart moves are forced.
+!> Reads the restart environment toggle and reports whether restart moves are forced.
 subroutine configure_restart_mode(force_restart)
     logical, intent(out) :: force_restart
     character(len=32) :: env_value
@@ -849,7 +864,7 @@ subroutine configure_restart_mode(force_restart)
     force_restart = .true.
     call get_environment_variable('SOD_FORCE_RESTART_ACCEPT', env_value, length=len_env, status=status)
     if (status /= 0 .or. len_env <= 0) then
-        write(*,'(A)') 'Modo reinicio forzado: activo (por defecto)'
+        write(*,'(A)') 'Forced restart acceptance: enabled (default)'
         return
     end if
     
@@ -864,42 +879,42 @@ subroutine configure_restart_mode(force_restart)
     select case (trim(token))
     case ('0', 'no', 'false', 'off', 'disable', 'disabled')
         force_restart = .false.
-        write(*,'(A)') 'Modo reinicio forzado: desactivado (SOD_FORCE_RESTART_ACCEPT='//trim(token)//')'
+        write(*,'(A)') 'Forced restart acceptance: disabled (SOD_FORCE_RESTART_ACCEPT='//trim(token)//')'
     case ('1', 'yes', 'true', 'on', 'enable', 'enabled')
         force_restart = .true.
-        write(*,'(A)') 'Modo reinicio forzado: activo (SOD_FORCE_RESTART_ACCEPT='//trim(token)//')'
+        write(*,'(A)') 'Forced restart acceptance: enabled (SOD_FORCE_RESTART_ACCEPT='//trim(token)//')'
     case default
         force_restart = .true.
-        write(*,'(A)') 'Modo reinicio forzado: activo (valor desconocido, se usa por defecto)'
+        write(*,'(A)') 'Forced restart acceptance: enabled (unrecognized value, using default)'
     end select
 end subroutine configure_restart_mode
 
-! Opens the summary CSV and text files and writes their headers.
+!> Opens the summary CSV and text files and writes their headers.
 subroutine init_summary_files(unit_csv, unit_txt)
     integer, intent(out) :: unit_csv, unit_txt
     integer :: ios
     
     open(newunit=unit_csv, file=summary_filename, status='replace', action='write', iostat=ios)
     if (ios /= 0) then
-        write(error_unit,'(A)') 'Error: no se pudo crear el archivo de resumen '//trim(summary_filename)
+        write(error_unit,'(A)') 'Error: failed to create summary file '//trim(summary_filename)
         stop 1
     end if
     open(newunit=unit_txt, file=summary_txt_filename, status='replace', action='write', iostat=ios)
     if (ios /= 0) then
-        write(error_unit,'(A)') 'Error: no se pudo crear el archivo de resumen '//trim(summary_txt_filename)
+        write(error_unit,'(A)') 'Error: failed to create summary file '//trim(summary_txt_filename)
         stop 1
     end if
-    write(unit_csv,'(A)') '#N;FracGe;E_exp_total;E_min_total;Var_total;E_exp_ladoSi;E_min_ladoSi;'// &
-    'E_exp_ladoGe;E_min_ladoGe;E_exp_combinada;Delta_exp_total;Delta_min_total;'// &
-    'Delta_exp_ladoSi;Delta_min_ladoSi;Delta_exp_ladoGe;Delta_min_ladoGe;Delta_exp_combinada;'// &
-    'Ratio_aceptacion'
-    write(unit_txt,'(A)') '#N FracGe E_exp_total E_min_total Var_total E_exp_ladoSi E_min_ladoSi '// &
-    'E_exp_ladoGe E_min_ladoGe E_exp_combinada Delta_exp_total Delta_min_total '// &
-    'Delta_exp_ladoSi Delta_min_ladoSi Delta_exp_ladoGe Delta_min_ladoGe Delta_exp_combinada '// &
-    'Ratio_aceptacion'
+    write(unit_csv,'(A)') '#N;FracGe;E_exp_total;E_min_total;Var_total;E_exp_Si_side;E_min_Si_side;'// &
+    'E_exp_Ge_side;E_min_Ge_side;E_exp_mixed;Delta_exp_total;Delta_min_total;'// &
+    'Delta_exp_Si_side;Delta_min_Si_side;Delta_exp_Ge_side;Delta_min_Ge_side;Delta_exp_mixed;'// &
+    'Acceptance_ratio'
+    write(unit_txt,'(A)') '#N FracGe E_exp_total E_min_total Var_total E_exp_Si_side E_min_Si_side '// &
+    'E_exp_Ge_side E_min_Ge_side E_exp_mixed Delta_exp_total Delta_min_total '// &
+    'Delta_exp_Si_side Delta_min_Si_side Delta_exp_Ge_side Delta_min_Ge_side Delta_exp_mixed '// &
+    'Acceptance_ratio'
 end subroutine init_summary_files
 
-! Closes the summary file units if they are valid.
+!> Closes the summary file units if they are valid.
 subroutine close_summary_files(unit_csv, unit_txt)
     integer, intent(in) :: unit_csv, unit_txt
     
@@ -907,7 +922,7 @@ subroutine close_summary_files(unit_csv, unit_txt)
     if (unit_txt /= 0) close(unit_txt)
 end subroutine close_summary_files
 
-! Chooses exhaustive or stochastic evaluation for a substitution level and dispatches it.
+!> Chooses exhaustive or stochastic evaluation for a substitution level and dispatches it.
 subroutine process_level(level, total_sites, config, temperature, samples_level, max_exact, sampler, &
     force_sampling, force_restart_accept, use_parallel, summary_unit, summary_txt_unit)
     integer, intent(in) :: level, total_sites, samples_level, max_exact
@@ -928,7 +943,7 @@ subroutine process_level(level, total_sites, config, temperature, samples_level,
     
     total_comb = binomial_int64(total_sites, level)
     if (total_comb == 0_ip) then
-        write(*,'(A,I3)') 'Nivel ', level, ': sin combinaciones válidas.'
+        write(*,'(A,I3)') 'Level ', level, ': no valid combinations.'
         return
     end if
     
@@ -942,11 +957,11 @@ subroutine process_level(level, total_sites, config, temperature, samples_level,
     
     if (use_sampling) then
         if (force_this_level .and. total_comb <= max_exact) then
-            write(*,'(A,I0,A,I0,A,I0,A)') 'Nivel ', level, ': muestreo MC forzado (combinaciones=', int(total_comb, kind=kind(max_exact)), ', umbral exacto=', max_exact, ').'
+            write(*,'(A,I0,A,I0,A,I0,A)') 'Level ', level, ': forced Monte Carlo sampling (combinations=', int(total_comb, kind=kind(max_exact)), ', exact threshold=', max_exact, ').'
         else if (sampler == 'metropolis') then
-            write(*,'(A,I0,A)') 'Nivel ', level, ': se usa muestreo Monte Carlo tipo Metropolis-Hastings.'
+            write(*,'(A,I0,A)') 'Level ', level, ': using Metropolis-Hastings Monte Carlo sampling.'
         else
-            write(*,'(A,I0,A)') 'Nivel ', level, ': se usa muestreo Monte Carlo uniforme.'
+            write(*,'(A,I0,A)') 'Level ', level, ': using uniform Monte Carlo sampling.'
         end if
         if (sampler == 'metropolis') then
             call metropolis_level(level, total_sites, config, temperature, samples_level, total_comb, &
@@ -962,7 +977,7 @@ subroutine process_level(level, total_sites, config, temperature, samples_level,
     end if
 end subroutine process_level
 
-! Enumerates every configuration for a level and accumulates energy statistics.
+!> Enumerates every configuration for a level and accumulates energy statistics.
 subroutine exhaustive_level(level, total_sites, config, temperature, total_comb, ncomb_int, use_parallel, &
     summary_unit, summary_txt_unit)
     integer, intent(in) :: level, total_sites, ncomb_int
@@ -1014,7 +1029,7 @@ subroutine exhaustive_level(level, total_sites, config, temperature, total_comb,
     end if
     
     if (idx == 0) then
-        write(*,'(A,I3)') 'Nivel ', level, ': no se pudieron generar configuraciones válidas.'
+        write(*,'(A,I3)') 'Level ', level, ': could not generate valid configurations.'
         deallocate(energies, energies_low, energies_high)
         return
     end if
@@ -1027,7 +1042,7 @@ subroutine exhaustive_level(level, total_sites, config, temperature, total_comb,
     deallocate(energies, energies_low, energies_high)
 end subroutine exhaustive_level
 
-! Samples random configurations uniformly when exhaustive enumeration is infeasible.
+!> Samples random configurations uniformly when exhaustive enumeration is infeasible.
 subroutine monte_carlo_level(level, total_sites, config, temperature, samples_level, total_comb, use_parallel, &
     summary_unit, summary_txt_unit)
     integer, intent(in) :: level, total_sites, samples_level
@@ -1093,7 +1108,7 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
          low_contribs, high_contribs, accept_attempt, gulp_energies, canonical_subset)
     call symmetry_get_matrix(eqmatrix, nop, npos)
     if (.not. associated(eqmatrix)) then
-        write(*,'(A)') 'Aviso: no se pudo obtener EQMATRIX para la deduplicacion de muestras.'
+        write(*,'(A)') 'Warning: could not obtain EQMATRIX for sample deduplication.'
         call flush(output_unit)
         nullify(unique_subsets)
         nullify(energies)
@@ -1124,7 +1139,7 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
     attempt_count = 0
     max_attempts = max(50, samples_target * 50)
     
-    ! Deduplica muestras uniformes hasta reunir configuraciones simetricamente unicas.
+    ! Deduplicate uniform samples until enough symmetry-unique configurations are collected.
     do while (unique_count < unique_cap .and. attempt_count < max_attempts)
         call random_subset(total_sites, level, subset)
         call canonicalize_subset(subset, level, eqmatrix, nop, canonical_subset)
@@ -1148,7 +1163,7 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
                         if (new_cap < unique_cap) then
                             unique_cap = new_cap
                             cap_reduced = .true.
-                            write(*,'(A,I0,A,I0,A)') 'Nivel ', level, ': control adaptativo reduce objetivo a ', unique_cap, ' configuraciones unicas.'
+                            write(*,'(A,I0,A,I0,A)') 'Level ', level, ': adaptive control shrinks target to ', unique_cap, ' unique configurations.'
                             call flush(output_unit)
                         end if
                     end if
@@ -1161,25 +1176,25 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
     end do
     
     if (attempt_count >= max_attempts .and. unique_count < unique_cap) then
-        write(*,'(A,I0,A,I0,A)') 'Nivel ', level, ': muestreo aleatorio alcanzó ', attempt_count, ' intentos sin cubrir el cupo unico.'
+        write(*,'(A,I0,A,I0,A)') 'Level ', level, ': random sampling reached ', attempt_count, ' attempts without meeting the unique quota.'
         call flush(output_unit)
     end if
     
     if (unique_count == 0) then
-        write(*,'(A,I0)') 'Nivel ', level, ': no se pudo obtener ninguna configuracion unica.'
+        write(*,'(A,I0)') 'Level ', level, ': no symmetry-unique configuration could be found.'
         call flush(output_unit)
         if (trace_unit /= 0) call close_mc_trace_file(trace_unit)
         nullify(eqmatrix, unique_subsets, energies, energies_low, energies_high, low_contribs, high_contribs, &
                gulp_energies, canonical_subset, accept_attempt)
         return
     else
-        write(*,'(A,I0,A,I0)') 'Nivel ', level, ': configuraciones unicas acumuladas: ', unique_count
+        write(*,'(A,I0,A,I0)') 'Level ', level, ': symmetry-unique configurations collected: ', unique_count
         call flush(output_unit)
         if (cap_reduced) then
-            write(*,'(A,I0,A,I0)') 'Nivel ', level, ': objetivo adaptativo final: ', unique_cap
+            write(*,'(A,I0,A,I0)') 'Level ', level, ': final adaptive target: ', unique_cap
             call flush(output_unit)
         else if (unique_count < initial_unique_cap) then
-            write(*,'(A,I0,A,I0,A)') 'Nivel ', level, ': objetivo de ', initial_unique_cap, ' muestras unicas no alcanzado.'
+            write(*,'(A,I0,A,I0,A)') 'Level ', level, ': target of ', initial_unique_cap, ' unique samples not reached.'
             call flush(output_unit)
         end if
     end if
@@ -1249,7 +1264,7 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
     
     gulp_success = .false.
     gulp_energies = 0.0_dp
-    ! Evalua energias precisas con GULP para las configuraciones unicas guardadas.
+    ! Evaluate precise energies with GULP for the stored unique configurations.
     call evaluate_subsets_with_gulp(level, total_sites, unique_count, unique_subsets(:,1:unique_count), config, gulp_energies, gulp_success)
     if (gulp_success) then
         energies(1:unique_count) = gulp_energies(1:unique_count)
@@ -1271,10 +1286,10 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
         mean_energy = sum_energy / real(unique_count, dp)
         variance_energy = max(0.0_dp, (sumsq_energy / real(unique_count, dp)) - mean_energy**2)
         std_energy = sqrt(variance_energy)
-        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': media GULP = ', mean_energy, ' eV, desviacion = ', std_energy
+        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Level ', level, ': GULP mean = ', mean_energy, ' eV, deviation = ', std_energy
         call flush(output_unit)
     else
-        write(*,'(A,I0,A)') 'Nivel ', level, ': no se pudieron evaluar todas las muestras con GULP; se mantienen energias internas.'
+        write(*,'(A,I0,A)') 'Level ', level, ': some samples could not be evaluated with GULP; keeping internal energies.'
         call flush(output_unit)
     end if
     config = 1
@@ -1297,7 +1312,7 @@ subroutine monte_carlo_level(level, total_sites, config, temperature, samples_le
     nullify(canonical_subset)
 end subroutine monte_carlo_level
 
-! Runs a Metropolis-Hastings walk with optional restart moves for a substitution level.
+!> Runs a Metropolis-Hastings walk with optional restart moves for a substitution level.
 subroutine metropolis_level(level, total_sites, config, temperature, samples_level, total_comb, force_restart_accept, use_parallel, &
     summary_unit, summary_txt_unit)
     integer, intent(in) :: level, total_sites, samples_level
@@ -1490,7 +1505,7 @@ subroutine metropolis_level(level, total_sites, config, temperature, samples_lev
     burn_start = max(1, accept_count - burn_keep + 1)
     best_in_subset = (best_step >= burn_start)
     if (burn_start > 1) then
-        write(*,'(A,I0)') 'Metropolis: configuraciones descartadas en equilibrado = ', burn_start - 1
+        write(*,'(A,I0)') 'Metropolis: configurations discarded during burn-in = ', burn_start - 1
     end if
     
     if (level > 0 .and. accept_count >= burn_start) then
@@ -1550,16 +1565,16 @@ subroutine metropolis_level(level, total_sites, config, temperature, samples_lev
                         sumsq_energy = sum(energies(burn_start:accept_count)**2)
                         mean_energy = sum_energy / real(burn_sample_count, dp)
                         std_energy = sqrt(max(0.0_dp, (sumsq_energy / real(burn_sample_count, dp)) - mean_energy**2))
-                        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': media GULP (Metropolis) = ', mean_energy, ' eV, desviacion = ', std_energy
+                        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Level ', level, ': GULP mean (Metropolis) = ', mean_energy, ' eV, deviation = ', std_energy
                         call flush(output_unit)
                     else
-                        write(*,'(A,I0,A)') 'Nivel ', level, ': no se pudieron evaluar las muestras Metropolis con GULP.'
+                        write(*,'(A,I0,A)') 'Level ', level, ': Metropolis samples could not be evaluated with GULP.'
                         call flush(output_unit)
                     end if
                 end if
                 if (allocated(unique_subsets)) deallocate(unique_subsets)
             else
-                write(*,'(A)') 'Aviso: no se obtuvo EQMATRIX para evaluar salidas Metropolis con GULP.'
+                write(*,'(A)') 'Warning: EQMATRIX not available to evaluate Metropolis results with GULP.'
                 call flush(output_unit)
             end if
             nullify(eqmatrix)
@@ -1584,6 +1599,7 @@ subroutine metropolis_level(level, total_sites, config, temperature, samples_lev
     nullify(energies_high)
 end subroutine metropolis_level
 
+!> Attempts to calibrate side-specific energy estimates from sampled configurations.
 subroutine attempt_calibration_from_samples(level, total_sites, sample_start, sample_end, subsets, energies, energies_low, energies_high, low_contribs, high_contribs, best_index)
     integer, intent(in) :: level, total_sites, sample_start, sample_end
     integer, intent(in) :: subsets(:,:)
@@ -1701,7 +1717,7 @@ subroutine attempt_calibration_from_samples(level, total_sites, sample_start, sa
             end if
             if (unique_low_max(idx) > max_low) max_low = unique_low_max(idx)
         end do
-        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': energia lado Si min=', min_low, ', max=', max_low
+        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Level ', level, ': Si-side energy min=', min_low, ', max=', max_low
     end if
     if (have_high) then
         min_high = huge_marker
@@ -1712,7 +1728,7 @@ subroutine attempt_calibration_from_samples(level, total_sites, sample_start, sa
             end if
             if (unique_high_max(idx) > max_high) max_high = unique_high_max(idx)
         end do
-        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': energia lado Ge min=', min_high, ', max=', max_high
+        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Level ', level, ': Ge-side energy min=', min_high, ', max=', max_high
     end if
     
     if (do_calibrate .and. unique_count >= 5) then
@@ -1761,13 +1777,13 @@ subroutine attempt_calibration_from_samples(level, total_sites, sample_start, sa
             best_index = best_global_idx
         end if
         
-        write(*,'(A,I0,A,I0)') 'Calibracion MC completada en nivel ', level, ' con ', unique_count
+        write(*,'(A,I0,A,I0)') 'MC calibration completed at level ', level, ' with ', unique_count
         call flush(output_unit)
     else
         if (do_calibrate) then
-            write(*,'(A,I0)') 'Calibracion MC omitida por configuraciones unicas insuficientes en nivel ', level
+            write(*,'(A,I0)') 'MC calibration skipped due to insufficient unique configurations at level ', level
         else if (need_low_calib .neqv. need_high_calib) then
-            write(*,'(A,I0)') 'Calibracion MC omitida porque solo un lado requiere ajuste en nivel ', level
+            write(*,'(A,I0)') 'MC calibration skipped because only one side requires adjustment at level ', level
         end if
     end if
     
@@ -1778,7 +1794,7 @@ subroutine attempt_calibration_from_samples(level, total_sites, sample_start, sa
     
 end subroutine attempt_calibration_from_samples
 
-! Computes Boltzmann statistics for a level and records them to screen and summaries.
+!> Computes Boltzmann statistics for a level and records them to screen and summaries.
 subroutine summarize_level(level, total_sites, temperature, total_comb, processed, energies, best_energy, best_positions, &
     best_count, skipped, energies_low, energies_high, use_parallel, summary_unit, summary_txt_unit, &
     best_included, restart_attempts, restart_accepts, flip_attempts, flip_accepts)
@@ -2012,21 +2028,21 @@ subroutine summarize_level(level, total_sites, temperature, total_comb, processe
     write(accept_ratio_str,'(F12.6)') accept_ratio
     !$omp critical(summary_io)
     write(*,'(A)') separator
-    write(*,'(A,I3)') 'Sustituciones (N): ', level
-    write(*,'(A)') 'Combinaciones totales: '//trim(total_str)
-    write(*,'(A,F10.0)') 'Configuraciones procesadas: ', processed
-    write(*,'(A,I8)') 'Intentos descartados: ', max(skipped, 0)
-    write(*,'(A,F12.6)') 'Energía mínima (eV): ', best_energy
-    write(*,'(A,F12.6)') 'Energía esperada <E> (eV): ', expected
-    write(*,'(A,F12.6)') 'Varianza respecto a <E> (eV^2): ', variance
-    write(*,'(A,F12.6)') 'Desviación estándar (eV): ', sqrt(variance)
-    write(*,'(A,A)') 'Energía mínima lado Si (eV): ', trim(label_low)
-    write(*,'(A,A)') 'Energía esperada lado Si (eV): ', trim(exp_low_str)
-    write(*,'(A,A)') 'Energía mínima lado Ge (eV): ', trim(label_high)
-    write(*,'(A,A)') 'Energía esperada lado Ge (eV): ', trim(exp_high_str)
-    write(*,'(A,A)') 'Energía esperada combinada (eV): ', trim(mix_exp_str)
-    write(*,'(A,F10.6)') 'Probabilidad Boltzmann del mínimo: ', prob_best
-    write(*,'(A,F8.4)') 'Ratio de aceptación: ', accept_ratio
+    write(*,'(A,I3)') 'Substitutions (N): ', level
+    write(*,'(A)') 'Total combinations: '//trim(total_str)
+    write(*,'(A,F10.0)') 'Configurations processed: ', processed
+    write(*,'(A,I8)') 'Rejected attempts: ', max(skipped, 0)
+    write(*,'(A,F12.6)') 'Minimum energy (eV): ', best_energy
+    write(*,'(A,F12.6)') 'Expected energy <E> (eV): ', expected
+    write(*,'(A,F12.6)') 'Variance around <E> (eV^2): ', variance
+    write(*,'(A,F12.6)') 'Standard deviation (eV): ', sqrt(variance)
+    write(*,'(A,A)') 'Minimum Si-side energy (eV): ', trim(label_low)
+    write(*,'(A,A)') 'Expected Si-side energy (eV): ', trim(exp_low_str)
+    write(*,'(A,A)') 'Minimum Ge-side energy (eV): ', trim(label_high)
+    write(*,'(A,A)') 'Expected Ge-side energy (eV): ', trim(exp_high_str)
+    write(*,'(A,A)') 'Expected mixed energy (eV): ', trim(mix_exp_str)
+    write(*,'(A,F10.6)') 'Boltzmann probability of minimum: ', prob_best
+    write(*,'(A,F8.4)') 'Acceptance ratio: ', accept_ratio
     have_move_stats = present(restart_attempts) .and. present(restart_accepts) .and. &
     present(flip_attempts) .and. present(flip_accepts)
     if (have_move_stats) then
@@ -2044,18 +2060,18 @@ subroutine summarize_level(level, total_sites, temperature, total_comb, processe
         else
             flip_ratio = 0.0_dp
         end if
-        write(*,'(A,I8,A,I8,A,F8.4)') 'Restart aceptados: ', restart_accepts_val, ' / ', restart_attempts_val, &
+        write(*,'(A,I8,A,I8,A,F8.4)') 'Restart accepted: ', restart_accepts_val, ' / ', restart_attempts_val, &
         '  ratio: ', restart_ratio
-        write(*,'(A,I8,A,I8,A,F8.4)') 'Flip aceptados:    ', flip_accepts_val, ' / ', flip_attempts_val, &
+        write(*,'(A,I8,A,I8,A,F8.4)') 'Flip accepted:    ', flip_accepts_val, ' / ', flip_attempts_val, &
         '  ratio: ', flip_ratio
     end if
     call print_best_positions(best_positions, best_count)
     call save_best_structure_poscar(level, total_sites, best_positions, best_count)
     if (processed < real(total_comb, dp)) then
-        write(*,'(A)') 'Aviso: no se cubrieron todas las combinaciones (se empleó muestreo).'
+        write(*,'(A)') 'Warning: not all combinations were covered (sampling applied).'
     end if
     if (level == 0) then
-        write(*,'(A)') 'FracGe; E_esperada(ladoSi); E_min(ladoSi); E_esperada(ladoGe); E_min(ladoGe)'
+        write(*,'(A)') 'FracGe; E_exp(Si_side); E_min(Si_side); E_exp(Ge_side); E_min(Ge_side)'
     end if
     write(*,'(A)') trim(frac_str)//'; '//trim(exp_low_str)//'; '//trim(label_low)//'; ' &
     //trim(exp_high_str)//'; '//trim(label_high)
@@ -2085,13 +2101,13 @@ subroutine summarize_level(level, total_sites, temperature, total_comb, processe
     deallocate(weights)
 end subroutine summarize_level
 
-! Sorts the summary files by substitution level to keep outputs monotonic.
+!> Sorts the summary files by substitution level to keep outputs monotonic.
 subroutine reorder_summary_outputs()
     call reorder_single_summary(summary_filename, ';')
     call reorder_single_summary(summary_txt_filename, ' ')
 end subroutine reorder_summary_outputs
 
-! Loads a summary file, sorts its lines by level, and writes it back.
+!> Loads a summary file, sorts its lines by level, and writes it back.
 subroutine reorder_single_summary(filename, delimiter)
     character(len=*), intent(in) :: filename
     character(len=1), intent(in) :: delimiter
@@ -2169,7 +2185,7 @@ subroutine reorder_single_summary(filename, delimiter)
     deallocate(lines, levels)
 end subroutine reorder_single_summary
 
-! Parses the leading level integer from a delimited summary line.
+!> Parses the leading level integer from a delimited summary line.
 integer function extract_level_from_line(line, delimiter) result(level_val)
 character(len=*), intent(in) :: line
 character(len=1), intent(in) :: delimiter
@@ -2214,7 +2230,7 @@ if (ios /= 0) then
 end if
 end function extract_level_from_line
 
-! Performs insertion sort on parallel arrays of levels and lines.
+!> Performs insertion sort on parallel arrays of levels and lines.
 subroutine sort_lines_by_level(levels, lines, n)
     integer, intent(inout) :: levels(:)
     character(len=*), intent(inout) :: lines(:)
@@ -2236,7 +2252,7 @@ subroutine sort_lines_by_level(levels, lines, n)
     end do
 end subroutine sort_lines_by_level
 
-! Writes the minimum-energy configuration for a level as a VASP POSCAR file.
+!> Writes the minimum-energy configuration for a level as a VASP POSCAR file.
 subroutine save_best_structure_poscar(level, total_sites, best_positions, best_count)
     integer, intent(in) :: level, total_sites, best_count
     integer, intent(in) :: best_positions(:)
@@ -2271,15 +2287,15 @@ subroutine save_best_structure_poscar(level, total_sites, best_positions, best_c
     if (valid_positions) then
         write(filename,'("POSCAR_N",I4.4,".vasp")') level
         call write_vasp_file(best_config, total_sites, trim(filename))
-        write(*,'(A)') 'POSCAR minimo guardado en '//trim(filename)
+        write(*,'(A)') 'Minimum POSCAR saved to '//trim(filename)
     else
-        write(*,'(A)') 'Aviso: no se pudo generar el POSCAR minimo por posiciones invalidas.'
+        write(*,'(A)') 'Warning: could not generate minimum POSCAR due to invalid positions.'
     end if
     
     deallocate(best_config)
 end subroutine save_best_structure_poscar
 
-! Creates a trace CSV for Monte Carlo steps at the specified level.
+!> Creates a trace CSV for Monte Carlo steps at the specified level.
 subroutine open_mc_trace_file(level, unit_id)
     integer, intent(in) :: level
     integer, intent(out) :: unit_id
@@ -2289,14 +2305,14 @@ subroutine open_mc_trace_file(level, unit_id)
     write(filename,'("MC_TRACE_N",I4.4,".csv")') level
     open(newunit=unit_id, file=trim(filename), status='replace', action='write', iostat=ios)
     if (ios /= 0) then
-        write(error_unit,'(A,I0)') 'Aviso: no se pudo abrir archivo de traza MC para N=', level
+        write(error_unit,'(A,I0)') 'Warning: failed to open MC trace file for N=', level
         unit_id = 0
     else
         write(unit_id,'(A)') '#step;attempt;energy_eV;energy_low_eV;energy_high_eV'
     end if
 end subroutine open_mc_trace_file
 
-! Appends one Monte Carlo sample entry to the trace CSV if the unit is valid.
+!> Appends one Monte Carlo sample entry to the trace CSV if the unit is valid.
 subroutine write_mc_trace_step(unit_id, step_idx, attempt_idx, energy, energy_low, energy_high)
     integer, intent(in) :: unit_id
     integer, intent(in) :: step_idx, attempt_idx
@@ -2306,22 +2322,22 @@ subroutine write_mc_trace_step(unit_id, step_idx, attempt_idx, energy, energy_lo
     write(unit_id,'(I0,";",I0,";",F18.10,";",F18.10,";",F18.10)') step_idx, attempt_idx, energy, energy_low, energy_high
 end subroutine write_mc_trace_step
 
-! Closes the trace CSV unit when tracing has finished.
+!> Closes the trace CSV unit when tracing has finished.
 subroutine close_mc_trace_file(unit_id)
     integer, intent(in) :: unit_id
     
     if (unit_id /= 0) close(unit_id)
 end subroutine close_mc_trace_file
 
-! Prints the indices of the lowest-energy configuration sampled for a level.
+!> Prints the indices of the lowest-energy configuration sampled for a level.
 subroutine print_best_positions(best_positions, best_count)
     integer, intent(in) :: best_positions(:)
     integer, intent(in) :: best_count
     
     if (best_count <= 0) then
-        write(*,'(A)') 'Configuración de mínima energía: configuración base'
+        write(*,'(A)') 'Minimum-energy configuration: base structure'
     else
-        write(*,'(A)', advance='no') 'Configuración de mínima energía (posiciones 1..n): '
+        write(*,'(A)', advance='no') 'Minimum-energy configuration (positions 1..n): '
         write(*,'(*(1X,I3))') best_positions(1:best_count)
     end if
 end subroutine print_best_positions
