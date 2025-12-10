@@ -7,7 +7,7 @@ Este proyecto complementa el código SOD existente aportando una utilidad que ob
 ## Requisitos previos
 
 - **Fortran**: compilador compatible con Fortran 2008 (por ejemplo, `gfortran >= 10`).
-- **Proyecto SOD anterior**: se asume que el código del proyecto original (especialmente `src/energy_calc.f90` y dependencias) está disponible para enlazarlo.
+- **Proyecto SOD anterior**: se asume que el código del proyecto original (especialmente `src/sod_ensemble_energy_calculations.f90` y dependencias) está disponible para enlazarlo.
 - Ficheros de entrada generados por SOD en el directorio de trabajo:
   - `INSOD`
   - `SGO`
@@ -27,7 +27,7 @@ sod_ensemble_mc: $(MC_OBJS) $(COMMON_OBJS)
 	$(FC) $(FFLAGS) -o $@ $^
 ```
 
-Asegúrate de que `$(COMMON_OBJS)` contenga `energy_calc.o` y sus dependencias.
+Asegúrate de que `$(COMMON_OBJS)` contenga `sod_ensemble_energy_calculations.o` y sus dependencias.
 
 > Para aprovechar el paralelismo opcional, compila con soporte OpenMP (`gfortran -fopenmp ...`). Sin ese flag el programa se ejecutará en modo secuencial incluso si se pasa el argumento `omp`.
 

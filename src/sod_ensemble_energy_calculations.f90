@@ -12,7 +12,7 @@
 
 ! Module with the cluster-expansion based energy calculator used by SOD to
 ! evaluate relaxed structures, including symmetry mappings and GULP I/O.
-MODULE energy_calc
+MODULE sod_ensemble_energy_calculations
     USE omp_lib, ONLY: omp_in_parallel
     USE, INTRINSIC :: iso_fortran_env, ONLY: error_unit
     IMPLICIT NONE
@@ -82,8 +82,10 @@ MODULE energy_calc
     
 CONTAINS
     
-    SUBROUTINE init_energy_calc()
+    SUBROUTINE init_energy_calc(skip_energy_files)
         IMPLICIT NONE
+        LOGICAL, OPTIONAL, INTENT(IN) :: skip_energy_files
+        LOGICAL :: skip_energy_load
         INTEGER :: op, m, m1, m2, aux, i, j, k, io_stat
         INTEGER :: Mm1, Mm2, Mm3, Mm4
         ! Variables for EQMATRIX generation
@@ -113,6 +115,9 @@ CONTAINS
         INTEGER, ALLOCATABLE :: spat1r(:)
         REAL(dp) :: coordstemp(3)
         
+        skip_energy_load = .FALSE.
+        IF (PRESENT(skip_energy_files)) skip_energy_load = skip_energy_files
+
         max_low_order = 0
         max_high_order = 0
         E0_high = 0.0_dp
@@ -456,6 +461,25 @@ CONTAINS
             IF (ALLOCATED(coord2pos)) DEALLOCATE(coord2pos)
         END IF
         
+        IF (skip_energy_load) THEN
+            IF (ALLOCATED(dE1)) DEALLOCATE(dE1)
+            IF (ALLOCATED(dE2)) DEALLOCATE(dE2)
+            ALLOCATE(dE1(npos))
+            ALLOCATE(dE2(npos,npos))
+            dE1 = 0.0_dp
+            dE2 = 0.0_dp
+            IF (.NOT. ALLOCATED(subpos)) THEN
+                ALLOCATE(subpos(npos))
+                subpos = [(i, i=1, npos)]
+            ELSE IF (SIZE(subpos) /= npos) THEN
+                DEALLOCATE(subpos)
+                ALLOCATE(subpos(npos))
+                subpos = [(i, i=1, npos)]
+            END IF
+            WRITE(*,*) 'init_energy_calc: skipping energy file load (setup mode)'
+            RETURN
+        END IF
+
         ! Allocate energy terms
         ALLOCATE(dE1(npos))
         ALLOCATE(dE2(npos,npos))
@@ -2113,4 +2137,4 @@ SUBROUTINE get_eqmatrix(out_mat, out_nop, out_npos)
     END DO
 END SUBROUTINE get_eqmatrix
 
-END MODULE energy_calc
+END MODULE sod_ensemble_energy_calculations

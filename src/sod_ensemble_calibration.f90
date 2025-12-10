@@ -4,7 +4,7 @@
 module sod_ensemble_calibration
     use sod_ensemble_consts
     use sod_ensemble_utils
-    use energy_calc
+    use sod_ensemble_energy_calculations
     use, intrinsic :: iso_fortran_env, only: output_unit, error_unit
     implicit none
     private

@@ -7,13 +7,11 @@ module sod_ensemble_exact_mod
     use sod_ensemble_utils
     use sod_ensemble_config, only: mixing_weight, quartz_relative
     use sod_ensemble_symmetry
-    use energy_calc
+    use sod_ensemble_energy_calculations
     use sod_ensemble_calibration
     use, intrinsic :: iso_fortran_env, only: output_unit
     implicit none
-
-contains
-
+    contains
     subroutine run_sod_ensemble_exact(arg_offset)
         integer, intent(in), optional :: arg_offset
         integer :: level_min, level_max

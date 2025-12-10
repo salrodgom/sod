@@ -25,10 +25,9 @@ module sod_ensemble_workspace
 
     type(mc_workspace_type), allocatable, save, target :: workspaces(:)
     logical, save :: workspaces_ready = .false.
-
     public :: mc_workspace_prepare, mc_workspace_checkout, mc_workspace_finalize
 
-contains
+    contains
 
     ! Prepares thread-local workspaces sized for the expected level of parallelism.
     subroutine mc_workspace_prepare(enable_parallel)

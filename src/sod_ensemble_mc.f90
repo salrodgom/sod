@@ -20,7 +20,7 @@ module sod_ensemble_mc_mod
     use sod_ensemble_symmetry
     use sod_ensemble_workspace
     use sod_ensemble_calibration
-    use energy_calc
+    use sod_ensemble_energy_calculations
     use omp_lib, only: omp_in_parallel
     use, intrinsic :: iso_fortran_env, only: output_unit, error_unit
     implicit none
@@ -28,8 +28,7 @@ module sod_ensemble_mc_mod
     character(len=512), save :: summary_filename = ''
     character(len=512), save :: summary_txt_filename = ''
 
-contains
-
+    contains
     subroutine run_sod_ensemble_mc(arg_offset)
         integer, intent(in), optional :: arg_offset
         integer :: max_exact_combos
@@ -990,6 +989,7 @@ subroutine exhaustive_level(level, total_sites, config, temperature, total_comb,
     best_energy = huge(1.0_dp)
     best_positions = 0
     best_count = 0
+
     if (level == 0) then
         config = 1
         idx = 1
@@ -1311,6 +1311,7 @@ subroutine metropolis_level(level, total_sites, config, temperature, samples_lev
     integer :: current_subset(max(1, level))
     integer :: trial_subset(max(1, level))
     integer :: best_subset(max(1, level))
+    integer :: canonical_buf(max(1, level))
     integer :: best_count
     integer :: accept_count, max_trials, remove_idx, add_site
     integer :: i_attempt
@@ -1333,13 +1334,20 @@ subroutine metropolis_level(level, total_sites, config, temperature, samples_lev
     integer :: restart_attempts, restart_accepts
     integer :: flip_attempts, flip_accepts
     integer :: calib_best_idx
+    integer :: burn_sample_count, unique_count
+    integer :: sample_idx, existing
+    integer :: nop, npos
     integer, pointer :: sampled_subsets(:,:)
     real(dp), pointer :: low_contribs(:,:)
     real(dp), pointer :: high_contribs(:,:)
     integer, pointer :: accept_attempt(:)
     real(dp), pointer :: gulp_energies(:)
     integer, pointer :: canonical_subset(:)
+    integer, pointer :: eqmatrix(:,:)
+    integer, allocatable :: unique_subsets(:,:)
     real(dp) :: low_contrib_tmp(4), high_contrib_tmp(4)
+    logical :: gulp_success
+    real(dp) :: sum_energy, sumsq_energy, mean_energy, std_energy
     
     if (level == 0) then
         call exhaustive_level(level, total_sites, config, temperature, total_comb, 1, use_parallel, &
@@ -1494,6 +1502,67 @@ subroutine metropolis_level(level, total_sites, config, temperature, samples_lev
             best_count = level
             best_step = calib_best_idx
             best_in_subset = (best_step >= burn_start)
+        end if
+    end if
+
+    gulp_success = .false.
+    if (level > 0 .and. accept_count >= burn_start) then
+        burn_sample_count = accept_count - burn_start + 1
+        if (burn_sample_count > 0) then
+            call symmetry_get_matrix(eqmatrix, nop, npos)
+            if (associated(eqmatrix)) then
+                allocate(unique_subsets(level, burn_sample_count))
+                unique_subsets = 0
+                unique_count = 0
+                do sample_idx = burn_start, accept_count
+                    canonical_buf(1:level) = sampled_subsets(:, sample_idx)
+                    call canonicalize_subset(canonical_buf, level, eqmatrix, nop, canonical_buf)
+                    existing = find_subset_index(canonical_buf, level, unique_subsets, unique_count)
+                    if (existing == 0) then
+                        unique_count = unique_count + 1
+                        unique_subsets(:, unique_count) = canonical_buf(1:level)
+                    end if
+                end do
+                if (unique_count > 0) then
+                    gulp_energies(1:unique_count) = 0.0_dp
+                    call evaluate_subsets_with_gulp(level, total_sites, unique_count, unique_subsets(:,1:unique_count), config, &
+                        gulp_energies, gulp_success)
+                    if (gulp_success) then
+                        do sample_idx = burn_start, accept_count
+                            canonical_buf(1:level) = sampled_subsets(:, sample_idx)
+                            call canonicalize_subset(canonical_buf, level, eqmatrix, nop, canonical_buf)
+                            existing = find_subset_index(canonical_buf, level, unique_subsets, unique_count)
+                            if (existing > 0) then
+                                energies(sample_idx) = gulp_energies(existing)
+                            end if
+                        end do
+                        best_energy = minval(energies(burn_start:accept_count))
+                        do sample_idx = burn_start, accept_count
+                            if (energies(sample_idx) == best_energy) then
+                                best_subset(1:level) = sampled_subsets(:, sample_idx)
+                                best_step = sample_idx
+                                best_in_subset = (best_step >= burn_start)
+                                exit
+                            end if
+                        end do
+                        best_count = level
+                        sum_energy = sum(energies(burn_start:accept_count))
+                        sumsq_energy = sum(energies(burn_start:accept_count)**2)
+                        mean_energy = sum_energy / real(burn_sample_count, dp)
+                        std_energy = sqrt(max(0.0_dp, (sumsq_energy / real(burn_sample_count, dp)) - mean_energy**2))
+                        write(*,'(A,I0,A,F16.6,A,F16.6)') 'Nivel ', level, ': media GULP (Metropolis) = ', mean_energy, ' eV, desviacion = ', std_energy
+                        call flush(output_unit)
+                    else
+                        write(*,'(A,I0,A)') 'Nivel ', level, ': no se pudieron evaluar las muestras Metropolis con GULP.'
+                        call flush(output_unit)
+                    end if
+                end if
+                if (allocated(unique_subsets)) deallocate(unique_subsets)
+            else
+                write(*,'(A)') 'Aviso: no se obtuvo EQMATRIX para evaluar salidas Metropolis con GULP.'
+                call flush(output_unit)
+            end if
+            nullify(eqmatrix)
         end if
     end if
     

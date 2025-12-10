@@ -1,6 +1,7 @@
 program sod_ensemble
     use sod_ensemble_mc_mod, only: run_sod_ensemble_mc
     use sod_ensemble_exact_mod, only: run_sod_ensemble_exact
+    use sod_ensemble_setup_mod, only: run_sod_ensemble_setup
     use, intrinsic :: iso_fortran_env, only: error_unit
     implicit none
 
@@ -27,13 +28,13 @@ program sod_ensemble
 
     call classify_first_argument(first_arg, argc, mode_selected, mode_token, offset)
     if (.not. mode_selected) then
-        write(error_unit,'(A)') 'Error: se debe indicar el modo "mc" o "exact" como primer argumento o mediante --mode.'
+        write(error_unit,'(A)') 'Error: se debe indicar el modo "mc", "exact" o "setup" como primer argumento o mediante --mode.'
         call print_combined_usage()
         stop 1
     end if
 
     if (.not. normalize_mode(mode_token)) then
-        write(error_unit,'(A)') 'Error: modo desconocido "'//trim(mode_token)//'". Use "mc" o "exact".'
+        write(error_unit,'(A)') 'Error: modo desconocido "'//trim(mode_token)//'". Use "mc", "exact" o "setup".'
         call print_combined_usage()
         stop 1
     end if
@@ -43,6 +44,8 @@ program sod_ensemble
         call run_sod_ensemble_mc(arg_offset=offset)
     case ('exact')
         call run_sod_ensemble_exact(arg_offset=offset)
+    case ('setup')
+        call run_sod_ensemble_setup(arg_offset=offset)
     case default
         write(error_unit,'(A)') 'Error interno: modo no reconocido tras normalización.'
         stop 1
@@ -73,6 +76,10 @@ contains
             mode_token = trim(lowered_trim)
             offset = 1
         case ('exact', 'enumeracion', 'enumeration', 'exhaustiva', 'exhaustive')
+            mode_selected = .true.
+            mode_token = trim(lowered_trim)
+            offset = 1
+        case ('setup', 'preparacion', 'prepare')
             mode_selected = .true.
             mode_token = trim(lowered_trim)
             offset = 1
@@ -135,6 +142,9 @@ contains
         case ('exact', 'enumeracion', 'enumeration', 'enumerate', 'exhaustive', 'exhaustiva')
             token = 'exact'
             normalize_mode = .true.
+        case ('setup', 'preparacion', 'prepare')
+            token = 'setup'
+            normalize_mode = .true.
         case default
             normalize_mode = .false.
         end select
@@ -179,17 +189,19 @@ contains
     end function is_help_token
 
     subroutine print_combined_usage()
-        write(*,'(A)') 'Uso: sod_ensemble <mc|exact> [argumentos del modo]'
-        write(*,'(A)') '     sod_ensemble --mode <mc|exact> [argumentos del modo]'
-        write(*,'(A)') '     sod_ensemble --mode=<mc|exact> [argumentos del modo]'
+        write(*,'(A)') 'Uso: sod_ensemble <mc|exact|setup> [argumentos del modo]'
+        write(*,'(A)') '     sod_ensemble --mode <mc|exact|setup> [argumentos del modo]'
+        write(*,'(A)') '     sod_ensemble --mode=<mc|exact|setup> [argumentos del modo]'
         write(*,'(A)') '     sod_ensemble --help'
         write(*,'(A)') ''
         write(*,'(A)') '  mc    -> ejecuta el muestreo Monte Carlo (equivalente a sod_ensemble_mc).'
         write(*,'(A)') '  exact -> ejecuta la enumeración exhaustiva (equivalente a sod_ensemble_exact).'
+        write(*,'(A)') '  setup -> prepara carpetas n0X con configuraciones únicas y lanza el flujo de GULP.'
         write(*,'(A)') ''
         write(*,'(A)') 'Ejemplos:'
         write(*,'(A)') '  sod_ensemble mc -T 800 -M 6 -C 2000 -s 1234 -a metropolis --omp'
         write(*,'(A)') '  sod_ensemble exact -N 5:10 -t 1e-5'
+        write(*,'(A)') '  sod_ensemble setup -N 3,6,9'
         write(*,'(A)') ''
         write(*,'(A)') 'Los ejecutables tradicionales sod_ensemble_mc y sod_ensemble_exact siguen disponibles como'
         write(*,'(A)') 'envoltorios que delegan en este binario unificado.'

@@ -4,7 +4,7 @@
 
 module sod_ensemble_symmetry
     use sod_ensemble_consts
-    use energy_calc, only: get_eqmatrix
+    use sod_ensemble_energy_calculations, only: get_eqmatrix
     implicit none
     private
     logical, save :: symmetry_ready = .false.
@@ -14,7 +14,7 @@ module sod_ensemble_symmetry
 
     public :: symmetry_initialize, symmetry_get_matrix, symmetry_finalize
 
-contains
+    contains
 
     subroutine symmetry_initialize()
         integer, allocatable :: tmp(:,:)

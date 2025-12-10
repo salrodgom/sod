@@ -3,7 +3,7 @@
 !  exhaustive enumerator. Energies are not required; only degeneracy counts are
 !  used to evaluate S_conf = k_B ln W for each substitution level.
 !*******************************************************************************
-program sod_config_entropy
+program sod_ensemble_config_entropy
     use sod_ensemble_consts
     use, intrinsic :: iso_fortran_env, only: output_unit, error_unit
     implicit none
@@ -232,7 +232,7 @@ contains
 
     subroutine print_usage()
         implicit none
-        write(*,'(A)') 'Uso: sod_config_entropy [-N <especificacion>]' 
+        write(*,'(A)') 'Uso: sod_ensemble_config_entropy [-N <especificacion>]'
         write(*,'(A)') ''
         write(*,'(A)') '  -N espec   Define los niveles a evaluar:'
         write(*,'(A)') '             -N -1            -> todos los niveles disponibles'
@@ -545,4 +545,4 @@ contains
         end if
     end function log10_from_log
 
-end program sod_config_entropy
+end program sod_ensemble_config_entropy
