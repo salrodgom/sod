@@ -37,28 +37,248 @@ tar xzvf sod(version).tar.gz
 make all
 ```
 
-- The ensemble drivers are now available through a unified executable:
-
-```bash
-bin/sod_ensemble <mc|exact> [opciones]
-```
-
-Use `mc` to run the Monte Carlo sampler (previously `sod_boltzmann_mc`) or `exact` to enumerate exhaustively (previously `sod_boltzmann_exact`). The legacy `sod_boltzmann*` binaries remain as thin wrappers that forward to the unified entry point, so existing workflows keep working unchanged.
-
-Typical invocations now accept explícit flags so that cada argumento sea auto-documentado:
-
-```bash
-bin/sod_ensemble mc -T 800 -M 6 -C 2000 -s 1234 -a metropolis --omp -N 3:8
-bin/sod_ensemble exact -N 5:10 -t 1e-5 --just-outsod
-```
-
-Old positional syntax (`sod_ensemble mc 800 6 2000 …`) still works for compatibility, but the flagged form is recommended for scripts because it leaves claro qué valor corresponde a cada parámetro.
-
 - Add ROOTSOD/sod(version)/bin to your executables path 
 
 ```bash 
 # add the bin folder to the executables path in your .bashrc file
 export PATH=$PATH:ROOTSOD/sod(version)/bin
+```
+
+## Unified ensemble workflows
+
+The modern ensemble drivers are available through a unified executable:
+
+```bash
+bin/sod <mc|exact|setup|comb|spbe|entropy|compare|eqmatrix> [mode arguments]
+bin/sod --mode <mc|exact|setup|comb|spbe|entropy|compare|eqmatrix> [mode arguments]
+bin/sod --mode=<mc|exact|setup|comb|spbe|entropy|compare|eqmatrix> [mode arguments]
+```
+
+Available modes:
+
+- `mc`: Monte Carlo sampling workflow with optional GULP recalculation and calibration.
+- `exact`: exhaustive enumeration of all configurations at the requested substitution levels.
+- `setup`: preparation of `n0X` folders, `OUTSOD`, POSCAR files, and external-engine inputs or runs.
+- `comb`: pure combinatorial enumeration without external calculations.
+- `spbe`: pair-based extrapolation workflow on top of the modern Hamiltonian core.
+- `entropy`: configurational entropy from `OUTSOD_Nxxxx`.
+- `compare`: comparison of `DeltaG_config` curves between two folders, including a generated `gnuplot` fitting script.
+- `eqmatrix`: direct generation of `EQMATRIX` from `INSOD` and `SGO`.
+
+Recommended discovery commands:
+
+```bash
+bin/sod --help
+bin/sod mc --help
+bin/sod exact --help
+bin/sod setup --help
+bin/sod entropy --help
+bin/sod compare --help
+```
+
+### `mc` mode
+
+Usage:
+
+```bash
+bin/sod mc [-T <K>] [-M <Nmax>] [-C <Nsamples>] [-s <seed>] [-a <sampler>] [--omp|--no-omp] [--force-mc] [-N <spec>]
+```
+
+Options:
+
+- `-T, --temperature <K>`: temperature in Kelvin for Boltzmann weights. Default: `1000`.
+- `-M, --max-substitutions <N>`: maximum substitution level evaluated when `-N` is absent. Default: `-1` (all levels).
+- `-C, --samples <N>`: Monte Carlo samples per level when the combination count exceeds the exact threshold. Default: `5000`.
+- `-s, --seed <value>`: random seed. Default: `-1` (derived from `system_clock`).
+- `-a, --sampler <uniform|metropolis>`: sampling scheme. Default: `uniform`.
+- `--omp`, `--no-omp`: explicitly enable or disable OpenMP.
+- `-N <spec>`: level selection. Examples: `-N 5`, `-N 3:8`, `-N 12,30,45`.
+- `--parallel-lists`: keep OpenMP enabled even when `-N` is an explicit list.
+- `--force-mc`: force Monte Carlo sampling even when exact enumeration would be possible.
+- `--template-gin <file>`: append the requested template fragment when generating `.gin` files.
+- `--no-template-gin`: skip template fragments when creating `.gin` files. This is the default behavior.
+
+Notes:
+
+- By default every level from `N=0` to `Nmax` is evaluated unless `-N` restricts the set.
+- If `C(N,npos) <= 200000`, the level is enumerated exactly; otherwise Monte Carlo sampling is used.
+- Results are written to `sod_ensemble_summary.csv` and `sod_ensemble_summary.txt`.
+
+Examples:
+
+```bash
+bin/sod mc
+bin/sod mc -T 800 -M 6 -C 2000 -s 1234 -a metropolis --omp
+bin/sod mc -N 12,30,45
+```
+
+### `exact` mode
+
+Usage:
+
+```bash
+bin/sod exact [-N <spec>] [-t <tol_eV>] [--just-outsod] [--template-gin <file>]
+```
+
+Options:
+
+- `-N <spec>`: requested levels. Examples: `-N -1`, `-N 12`, `-N 1:12`, `-N 3,6,9`.
+- `-t, --tolerance <tol>`: energy tolerance in eV used to group minima. Default: `1e-6`.
+- `--just-outsod`: write only `xNN/OUTSOD`, skipping `xNN/ENERGIES` and POSCAR files.
+- `--template-gin <file>`: append the requested template fragment when generating `.gin` files.
+- `--no-template-gin`: skip template fragments when creating `.gin` files. This is the default behavior.
+
+Examples:
+
+```bash
+bin/sod exact -N 5:10 -t 1e-5
+bin/sod exact -N 8
+bin/sod exact -N 3,6,9 --just-outsod
+```
+
+### `setup` mode
+
+Usage:
+
+```bash
+bin/sod setup -N <spec> [--template-gin <file>]
+```
+
+Options:
+
+- `-N, -n <spec>`: levels to prepare. Supports a single value, a range such as `2:6`, or a list such as `0,3,5,7`.
+- `--template-gin <file>`: append the requested template fragment when generating `.gin` files.
+- `--no-template-gin`: skip template fragments when creating `.gin` files. This is the default behavior.
+
+What it generates:
+
+- `n0X` folders for each selected level.
+- `OUTSOD` and POSCAR files inside each folder.
+- For `FILER=1`, the GULP execution scripts (`run_jobs.sh`, `extract.sh`, `vasp2gin.sh`, and protocol resources when available).
+- For `FILER=2`, the LAMMPS execution scripts plus `template_in.lammps`.
+- For `FILER=14`, the ASE execution scripts plus `template_ase.py`.
+- An `ENERGIES` file per prepared level after `run_jobs.sh` and `extract.sh` whenever the selected FILER launches an engine.
+
+Example:
+
+```bash
+bin/sod setup -N 3,6,9 --template-gin default
+```
+
+### `entropy` mode
+
+Usage:
+
+```bash
+bin/sod entropy [-N <spec>]
+```
+
+Options:
+
+- `-N <spec>`: requested levels. Examples: `-N -1`, `-N 12`, `-N 3:8`, `-N 5,9,11`.
+
+Output:
+
+- Reads `OUTSOD_Nxxxx` from the current folder.
+- Writes the aggregated entropy table to `sod_entropy_summary.csv`.
+
+Example:
+
+```bash
+bin/sod entropy -N -1
+```
+
+### `compare` mode
+
+Usage:
+
+```bash
+bin/sod compare --system <folder> --reference <folder> --temperature <K> [options]
+```
+
+Required arguments:
+
+- `--system <folder>`: folder containing `sod_ensemble_summary.csv` and `sod_entropy_summary.csv` for the system of interest.
+- `--reference <folder>`: reference folder containing `sod_entropy_summary.csv`.
+- `-t, --temperature <K>`: temperature used to convert `S_conf` into `TDeltaS`.
+
+Optional arguments:
+
+- `-o, --output-prefix <prefix>`: prefix for the generated `.dat` and `.gnuplot` files.
+- `--system-label <text>`: label used in the plots for the system folder.
+- `--reference-label <text>`: label used in the plots for the reference folder.
+
+Generated files:
+
+- `<prefix>_system.dat`
+- `<prefix>_reference.dat`
+- `<prefix>.gnuplot`
+
+The generated `gnuplot` script fits the reference `TDeltaS` curve with order-2/3/4 `x*(1-x)` polynomials and evaluates three `DeltaG` estimates for the study system:
+
+- the total `DeltaG` built from `Delta_exp_total`
+- a low-`xY` projection built from `Delta_exp_X_side`
+- a high-`xY` projection built from `Delta_exp_Y_side`
+
+This is useful for spotting the intermediate `xY` region where low-branch and high-branch effective-Hamiltonian projections disagree.
+
+Example:
+
+```bash
+bin/sod compare --system phase_A --reference phase_B -T 1500 -o compare_1500K
+```
+
+### Helper script for `compare`
+
+The repository also provides:
+
+```bash
+scripts/prepare_compare_folder.sh [options]
+```
+
+This helper prepares the current folder for a later `compare` run by:
+
+1. generating `xNN/OUTSOD` with `sod exact --just-outsod`
+2. generating `sod_entropy_summary.csv` with `sod entropy`
+3. generating `sod_ensemble_summary.csv` with `sod mc` when needed
+4. writing `compare_folder_status.txt`
+
+Options:
+
+- `-N, --levels <spec>`: level specification passed to `exact` and `entropy`. Default: `-1`.
+- `-T, --temperature <K>`: temperature for `mc` if `sod_ensemble_summary.csv` must be generated.
+- `--sod-bin <path>`: path to the `sod` executable.
+- `--label <text>`: optional label stored in `compare_folder_status.txt`.
+- `-a, --sampler <name>`: `mc` sampler. Default: `metropolis`.
+- `-s, --seed <value>`: `mc` seed. Default: `-1`.
+- `--template-gin <file>`: passed through to `sod mc`.
+- `--protocol <ver>`: passed through to `sod mc`. Use `1.0` or `2.0` and default to `2.0`.
+- `--force-outsod`: regenerate `OUTSOD_Nxxxx` even if some already exist.
+- `--force-entropy`: regenerate `sod_entropy_summary.csv`.
+- `--force-mc`: regenerate `sod_ensemble_summary.csv` even if it already exists.
+- `--skip-mc`: do not run `sod mc`.
+- `-h, --help`: show the help message.
+
+Examples:
+
+```bash
+scripts/prepare_compare_folder.sh -T 1500
+scripts/prepare_compare_folder.sh -T 1500 -N -1 --template-gin template_payload.gin --protocol 2.0
+scripts/prepare_compare_folder.sh --sod-bin /path/to/bin/sod -T 1500 --force-outsod --force-mc
+```
+
+### Environment variables used by external workflows
+
+- `SOD_GULP_PROTOCOL_VERSION=1.0|2.0`: selects the classic converter-only path or the staged protocol path used by `run_jobs.sh`.
+- `SOD_FORCE_RESTART_ACCEPT=<0|1|true|false>`: controls the Metropolis restart-acceptance behaviour in `mc`.
+- `SOD_GULP_CPUS` and `SOD_GULP_GLOBAL_LIMIT`: control CPU pinning and the global concurrency limit in `run_jobs.sh`.
+- `SOD_LAMMPS_EXECUTABLE=<path>`: selects the LAMMPS executable used when `FILER=2`.
+- `SOD_ASE_PYTHON=<path>`: selects the Python interpreter used when `FILER=14`. It must provide ASE and the requested calculator dependencies.
+
+When running long jobs remotely, it can also be useful to enable unbuffered Fortran output:
+
+```bash
+export GFORTRAN_UNBUFFERED_ALL=1
 ```
 
 ## Running SOD
@@ -81,170 +301,20 @@ top.gulp contains the heading of the gulp input file (until the keyword cell).
 
 bottom.gulp contains the tail of the gulp input file (everything after the list of coordinates, including species, potentials, etc).
 
-- To run the combinatorics program, just type:
+## Unified workflow
 
+This repository now keeps only the unified `sod` workflow as the supported interface.
 
-```bash
-sod_comb.sh
-```
+- Use `sod comb` for pure combinatorics and generation of inequivalent configurations.
+- Use `sod setup` to prepare `nNN` folders, write structures, and run the external workflow that produces `ENERGIES`.
+- Use `sod exact` for exhaustive enumeration with the modern effective Hamiltonian.
+- Use `sod mc` for stochastic sampling of the physical ensemble.
+- Use `sod entropy` to compute configurational entropies from `OUTSOD`.
+- Use `sod compare` to compare two systems.
+- Use `sod spbe` for the pair-based extrapolation workflow on top of the modern Hamiltonian core.
+- Use `sod eqmatrix` to generate `EQMATRIX` directly from `INSOD` and `SGO`.
 
-## Output of sod_comb.sh 
-
-- When the programme finishes, it writes to the standard output the total number of configurations and the number of independent configurations according to the crystal symmetry, plus some other useful information.
-
-- It writes the data file *OUTSOD*, which contains information on the independent configurations (one line for each configuration). The first number is the index of the configuration, the second is its degeneracy, and the next numbers are the substitution sites.
-
-- It also writes the file *EQMATRIX*, which gives information about  how each supercell operator transforms each atom position. 
-
-- The directory *CALCS* is generated, which contains the input files for GULP or VASP, a copy of the *OUTSOD* and *EQMATRIX* files,  and a script that sends the job. It is good practice to rename the *CALCS* folders as *n01*, *n02*, etc depending on the number of substitutions. That folder structure is used by some of the other sod executables (say for statistics or for energy extrapolation). 
-
-
-## Configurational averages and thermodynamics:
-
-In order to calculate configurational averages and obtain thermodynamic quantities, you need to execute the script:
-
-```bash
-sod_stat.sh
-```
-
-which requires 4 input files:
-
-- *OUTSOD*, which was the output from sod_comb
-
-- *TEMPERATURES*, a list of temperatures for the Boltzmann statistics, in one column, e.g.:
-
-```bash
-300
-600
-1000
-1250
-1500
-1750
-2000
-```
-
-(if the TEMPERATURES file does not exist, sod_stat calculates thermodynamic properties at T=1K, 300K, 1000K and in the limit of a very high temperature). 
-
-- *ENERGIES*, which contains (in one column) the energies of all the configurations, in the same order that they were generated by SOD (like in the OUTSOD file). There are some scripts in ROOTSOD/sod(version)/bin/  to help you do this:
-
-   1. If you are using GULP, the script  ```sod_gulp_ener.sh``` will extract all the energies, assuming all output files,  with extension .gout, are in the same folder. If you have calculated vibrational free energies for each configuration, ```sod_gulp_free.sh``` will extract these. 
-
-   2. If you are using VASP, the script ```sod_vasp_ener.sh``` will extract all the energies, assuming you have separate folders for each configuration. 
-
-- *DATA*, which contains *ncol* colums of data to average. The first line contains just the number *ncol* of columns to read. For example:
-
-```bash
-2
-34.5   4.34
-37.7   4.35
-35.6   4.38
-38.8   4.41
-```
-
-The data can be cell lenghts, or volumes (please see SOD papers for strategies on how to obtain average cell parameters) or any other observable obtained from the calculations. Scripts like ```sod_vasp_cell.sh``` can help you do this, please edit carefully before using them.
-
-```sod_stat.sh``` will generate two files: probabilities.dat and thermodynamics.dat, whose content is self-explanatory.
-
-
-Important note: While configurational averages (e.g. of cell parameters and enthalpies) tend to converge very quickly with supercell size, entropies and free energies, which are not defined by averaging, converge very slowly with supercell size, and are generally in large error when using the SOD method. We therefore do not recommend using SOD for the calculation of entropies and free energies, unless appropriate correcting procedures have been used.
-
-
-## Grand-canonical analysis 
-
-From version 0.51, it is possible to do statistics in a grand-canonical ensemble, i.e. including results from supercells with different compositions. Please see example4 (perovskites) and example5 (pyrochlore).
-
-We recommend to create a file with name x??? at the same level as the n?? files. For example x250 is used for a grandcanonical analyis at composition x=0.250. 
-
- The *OUTSOD_00*, *OUTSOD_01*, *OUTSOD_02*, *OUTSOD_03, and *OUTSOD04* files are the *OUTSOD* files for 0, 1, 2, 3, and 4 substitutions, respectively (note that sod_comb returns an error when you try to create zero substitutions, so *OUTSOD_00* must be created by hand at the moment; this will be corrected in future versions). You also need the *ENERGIES_00* ... *ENERGIES_04* files there. Optionally, you can add *DATA_00*, ..., *DATA_04*. The *TEMPERATURES* file can also be provided (optional, as for the canonical statistics). 
-
-In order to do the grand-canonical analysis, you need the grand-canonical input file *INGC*, which has a very simple structure. For example, to set the chemical potential, the first few lines of the file look like this:
-
-```bash
-# nsubsmin nsubsmax
-0   4
-# Specify x or mu, and provide its value
-mu -0.5
-```
-
-But it is possible to specify the composition (fraction x=nsubs/npos of sites that are substituted) and the chemical potential will be calculated automatically for each temperature. The chemical potential is obtained from a solution to a polynomial equation, using a simple bisection method. To do this the INGC file should look like:
-
-```bash
-# nsubsmin nsubsmax
-0   4
-# Specify x or mu, and provide its value
-x 0.25
-```
-
-In this example, x=0.25 corresponds to 2 substitutions in the canonical example, but in the grand-canonical analysis of the example, all compositions from 0 to 4 substitutions are included. 
-
-To run the grand-canonical analysis, type:
-
-```sod_gcstat.sh```
-
-If the naming convention *n??* for the different compositions was followed, and the *x???* file is at the same level of those, the script will copy all the necessary files automatically, so you only need the *INGC* file. The analysis produces a probabilities.dat and a thermodynamics.dat file as in the canonical analysis.   
-
-Finally, it is possible to make a "stress-volume" correction to the energies in the grand-canonical configurational ensemble. This correction is a simple way to account for the fact that if a cell with number of substitutions n (different from xN) contributes to a grand-canonical ensemble representing composition x, there is an additional stress-related energy cost. This is due to the difference in equilibrium volumes at compositions n/N and x. In a first approximation, if we know both the equilibrium volume and bulk module as a function of x, the energy of the stress-volume correction ($ESVC$) is 
-
-$ESVC(n,x) = \frac{1}{2} B(x) (V(x) - V\left(\frac{n}{N}\right))^2$
-
-It is possible to introduce this correction in the grand-canonical analysis by adding the following lines to INGC (see example5): 
-
-```bash
-# Stress corrections flag (lambda=0: no correction; lambda=1: bulk moduli-based correction)
-1
-# Parameters for volume variation with x: v0, v1, bv (Angstrom^3)
-1302.567820  1286.687504  0
-# Parameters for bulk modulus variation with x: bm0, bm1, bb (GPa)
-150 150 0
-```
-This setting leads to a simple linear interpolation of the equilibrium volumes and bulk moduli between the solid solution endmembers. A quadratic interpolation is also possible by using non-zero values of the bowing parameters $bv$ and/or $bb$. This functionality has not been well tested yet. If interested in using this correction scheme, please contact the SOD developers for further information. 
-
-
-## Averaging spectra
-
-Both in the canonical and in the grand-canonical analysis, it is possible to evaluate averages of spectra in the corresponding configurational ensemble. 
-
-Often, what is originally calculated for a given configuration is a list of peaks. In that case, running the "peaks2spectra" code, with the script: 
-
-```sod_p2s.sh```
-
-will generate the broadened spectra that will be averaged. This requires two input files (with fixed names):
-
-- *PEAKS* contains a list of peaks in each line; each line represents a different configuration (a different spectrum is generated for each configuration)
-- *INP2S* contains other info needed to generate the spectra, e.g. xmin, xmax, broadening(sigma), etc. See example5 for the format.
-
-That generates two output files:
-
-- *SPECTRA*, where each line contains the generated intensity values in the x grid, for each configuration.
-- *XSPEC*, which contains the list of x values at which the intensities are given.
-
-If these files are present within the n??/ folders when running the statistics codes (either ```sod_stat.sh``` or ```sod_gcstat.sh```), then a file with name ```ave_spectra.dat``` will be created with the configurational averages of the spectra at different temperatures.  
-
-
-## Extrapolating energies from low to high concentrations
-
-From version 0.44, we have implemented a simple pair-based extrapolation (SPBE) method, which uses the energies from *n*= 0, 1 and 2 substitutions to predict the energies for *n*>2 (equation 1 in [Arce-Molina et al. PCCP 2018, 20, 18047-18055](https://pubs.rsc.org/en/content/articlehtml/2018/cp/c8cp01369a)).   
-
-In order to run this program, you will need the following files:
-
-- *EQMATRIX* obtained from running sod_comb at any composition
-- *OUTSOD* for *n* substitutions
-- *ENERGIES0*: a file containing a single number, which is the energy for *n*=0
-- *ENERGIES1* and *OUTSOD1*: the *ENERGIES* and *OUTSOD* files for *n*=1 
-- *ENERGIES2* and *OUTSOD2*: the *ENERGIES* and *OUTSOD* files for *n*=2 
-- *INSPBE* file if you want to introduce some rescaling parameters (optional, see below)
-
-If all the above files are present in a folder, you can run the spbe module by running the ```spbesod``` executable. 
-
-However,  the easiest way to run the spbe module is like this:
-
-- Use the names n00 n01 n02 n03 etc for the folders containing the calculations for 0, 1, 2, 3... substitutions. 
-- Make sure that the folders n00, n01 and n02 contain an ENERGIES and an OUTSOD file each (OUTSOD is not necessary for n00)
-- If you want to use spbe, say, for n=3, first run ```sod_comb``` for n=3 substitutions, rename CALCS to n03, and create a folder within n03, say n03/spbe/
-- From the n03/spbe folder, just run the script ```sod_spbe0.sh```, which will copy the relevant input files into the current folder and will call ```spbesod```
-- It is also possible to run the spbe program using data from the other end of the solid solution (i.e. *x*=1). In that case, run the script ```sod_spbe1.sh```, which will copy the files from the folders with *N*, *N*-1, *N*-2 substitutions, will "invert" the OUTSOD files as needed, and call ```spbesod```. 
-
-Finally, it is possible to introduce some rescaling in the first-order and second-order terms to improve the match with a reference set of calculations. You need to give two reference energies in the INSPBE file. The recommended procedure is to run spbe first without rescaling, pick the minimum-energy and maximum-energy configurations (they are identified at the end of the OUTSPBE file) and run them with DFT (or whatever method provides the reference/target values), then input these two values as reference energies in INSPBE, and run the sod_spbe0.sh script again. See example4 (inside n04/spbe0), where the reference energies for configurations 1 and 6 are given as input. 
+The legacy standalone frontends and helper scripts (`sod_comb.sh`, `sod_stat.sh`, `sod_gcstat.sh`, `spbesod`, `sod_spbe0.sh`, `sod_spbe1.sh`, and related wrappers) are no longer part of this tree.
 
 
 ## Citing SOD

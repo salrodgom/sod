@@ -1,0 +1,42 @@
+units           metal
+dimension       3
+boundary        p p p
+atom_style      full
+
+read_data       c00001.data
+
+pair_style      buck/coul/long 16.0
+pair_coeff      * * 0.0 1.0 0.0
+bond_style      harmonic
+angle_style     harmonic
+kspace_style    pppm 1.0e-5
+
+mass            1 72.6300
+mass            2 28.0855
+mass            3 15.9994
+mass            4 1.0e-8
+
+set             type 1 charge  4.000000
+set             type 2 charge  4.000000
+set             type 3 charge  0.870733
+set             type 4 charge -2.870733
+
+pair_coeff      1 4 1497.3996 0.325646 16.808599
+pair_coeff      2 4 1315.2478 0.317759 10.141118
+pair_coeff      4 4 22764.0000 0.149000 10.937044
+
+bond_coeff      1 75.96980 0.0
+angle_coeff     1 1.2614 109.47
+
+
+neighbor        1.0 bin
+neigh_modify    every 1 delay 0 check yes
+thermo          10
+thermo_style    custom step pe etotal press
+
+min_style       cg
+minimize        1.0e-12 1.0e-12 1000 10000
+
+variable sod_final_pe equal pe
+print "SOD_FINAL_ENERGY ${sod_final_pe}"
+write_data c00001.min.data
